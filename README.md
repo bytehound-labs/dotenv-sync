@@ -499,7 +499,22 @@ profile as a short-lived Actions artifact. The coverage floor is intentionally
 kept in the repository so a coverage regression is visible in review without
 requiring a third-party coverage service.
 
-Every push to `main` now drives release automation automatically:
+Security automation runs on pull requests and pushes to `main`, with scheduled
+weekly scans:
+
+- `.github/workflows/codeql.yml` runs CodeQL analysis for Go.
+- `.github/workflows/gitleaks.yml` scans the complete Git history for leaked
+  credentials and redacts findings.
+- `.github/workflows/go-security.yml` runs the pinned `govulncheck` tool against
+  reachable Go vulnerabilities.
+- `.github/workflows/security-lint.yml` checks workflow syntax with `actionlint`
+  and audits GitHub automation with `zizmor`.
+
+`.github/dependabot.yml` requests weekly grouped security updates for Go
+modules and GitHub Actions. Routine version-update pull requests remain
+disabled so security fixes are not obscured by unrelated dependency churn.
+
+Every push to `main` drives release automation automatically:
 
 ```bash
 git switch main

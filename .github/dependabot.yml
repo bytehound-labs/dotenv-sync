@@ -1,0 +1,29 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    groups:
+      go-security-updates:
+        applies-to: security-updates
+        patterns:
+          - '*'
+    labels:
+      - dependencies
+      - go
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    groups:
+      github-actions-security-updates:
+        applies-to: security-updates
+        patterns:
+          - '*'
+    labels:
+      - dependencies
+      - ci
