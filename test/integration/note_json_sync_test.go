@@ -21,7 +21,6 @@ func TestNoteJSONReadCommandsIntegration(t *testing.T) {
 			itemName: {Notes: strings.TrimSpace(readRepoFile(t, "test", "testdata", "provider", "note-json-valid.json")), Password: "keep-me"},
 		},
 	})
-
 	stdout, stderr, code := runCLI(t, bin, project, stub.Env(), "sync")
 	if code != 0 || stderr != "" {
 		t.Fatalf("sync failed: code=%d stderr=%q stdout=%q", code, stderr, stdout)

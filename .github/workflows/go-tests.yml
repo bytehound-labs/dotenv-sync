@@ -1,24 +1,198 @@
 name: Go Tests
 
 on:
-  push:
-  pull_request:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: go-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  test:
-    name: Run Go tests
+  format:
+    name: Formatting and module checks
     runs-on: ubuntu-latest
-
+    timeout-minutes: 10
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          files="$(gofmt -l $(git ls-files '*.go'))"
+          if [ -n "${files}" ]; then
+            printf 'Unformatted Go files:\n%s\n' "${files}"
+            exit 1
+          fi
+
+      - name: Check module tidiness
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+  vet:
+    name: Go vet
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run go vet
+        run: go vet ./...
+
+  test:
+    name: Go tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Run test suite
         run: go test ./...
+
+  race:
+    name: Go race tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run race-enabled tests
+        run: go test -race ./...
+
+  build:
+    name: Build release targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            goos: linux
+            goarch: amd64
+            extension: ''
+          - name: linux-arm64
+            goos: linux
+            goarch: arm64
+            extension: ''
+          - name: darwin-amd64
+            goos: darwin
+            goarch: amd64
+            extension: ''
+          - name: darwin-arm64
+            goos: darwin
+            goarch: arm64
+            extension: ''
+          - name: windows-amd64
+            goos: windows
+            goarch: amd64
+            extension: .exe
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build ${{ matrix.name }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=0 go build -trimpath -o "dist/ds${{ matrix.extension }}" ./cmd/ds
+
+      - name: Smoke-test Linux binary
+        if: matrix.name == 'linux-amd64'
+        run: test "$(dist/ds --version)" = "ds dev"
+
+  required:
+    name: Required checks
+    if: always()
+    needs:
+      - format
+      - vet
+      - test
+      - race
+      - build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify all validation jobs passed
+        env:
+          FORMAT_RESULT: ${{ needs.format.result }}
+          VET_RESULT: ${{ needs.vet.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          RACE_RESULT: ${{ needs.race.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          set -euo pipefail
+          for result in \
+            "${FORMAT_RESULT}" \
+            "${VET_RESULT}" \
+            "${TEST_RESULT}" \
+            "${RACE_RESULT}" \
+            "${BUILD_RESULT}"; do
+            if [ "${result}" != "success" ]; then
+              echo "A validation job finished with: ${result}"
+              exit 1
+            fi
+          done

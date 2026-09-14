@@ -1,0 +1,77 @@
+name: Go Coverage
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: coverage-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    name: Generate Go coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Generate coverage profile
+        run: go test ./... -count=1 -covermode=atomic -coverprofile=coverage.out
+
+      - name: Enforce coverage floor
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(go tool cover -func=coverage.out | awk '$1 == "total:" {gsub("%", "", $3); print $3}')"
+          floor="$(tr -d '[:space:]' < .github/coverage-floor.txt)"
+          if [ -z "${actual}" ] || [ -z "${floor}" ]; then
+            echo "::error::coverage percentage or floor is missing"
+            exit 1
+          fi
+          if ! awk -v actual="${actual}" -v floor="${floor}" 'BEGIN { exit !(actual + 0 >= floor + 0) }'; then
+            echo "::error::coverage ${actual}% is below the ${floor}% floor"
+            exit 1
+          fi
+          echo "Coverage: ${actual}% (floor: ${floor}%)"
+
+      - name: Upload coverage profile
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: go-coverage-${{ github.sha }}
+          path: coverage.out
+          if-no-files-found: error
+          retention-days: 7
+
+  required:
+    name: Required coverage status
+    if: always()
+    needs: coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify coverage result
+        if: needs.coverage.result != 'success'
+        run: |
+          echo "Coverage ended with: ${{ needs.coverage.result }}"
+          exit 1
+
+      - name: Report successful coverage
+        run: echo "Coverage passed."

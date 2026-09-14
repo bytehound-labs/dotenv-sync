@@ -2,9 +2,10 @@ package bitwarden
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
+
+	"dotenv-sync/internal/testutil"
 )
 
 func TestCheckReadinessWithMissingBinary(t *testing.T) {
@@ -19,55 +20,36 @@ func TestCheckReadinessWithMissingBinary(t *testing.T) {
 
 func TestCheckReadinessWithStubStatuses(t *testing.T) {
 	cases := []struct {
-		name   string
-		script string
-		code   string
+		name string
+		opts testutil.RBWStubOptions
+		code string
 	}{
 		{
 			name: "unlocked",
-			script: "#!/bin/sh\ncase \"$1\" in\n" +
-				"unlocked) exit 0 ;;\n" +
-				"list) printf 'DATABASE_URL\\n' ;;\n" +
-				"*) exit 1 ;;\n" +
-				"esac\n",
+			opts: testutil.RBWStubOptions{Status: "unlocked"},
 			code: "",
 		},
 		{
 			name: "locked",
-			script: "#!/bin/sh\ncase \"$1\" in\n" +
-				"unlocked) exit 1 ;;\n" +
-				"list) echo 'database is locked' >&2; exit 1 ;;\n" +
-				"*) exit 1 ;;\n" +
-				"esac\n",
+			opts: testutil.RBWStubOptions{Status: "locked"},
 			code: "E003",
 		},
 		{
 			name: "logged-out",
-			script: "#!/bin/sh\ncase \"$1\" in\n" +
-				"unlocked) exit 1 ;;\n" +
-				"list) echo 'not logged in' >&2; exit 1 ;;\n" +
-				"*) exit 1 ;;\n" +
-				"esac\n",
+			opts: testutil.RBWStubOptions{Status: "logged out"},
 			code: "E002",
 		},
 		{
 			name: "legacy-status-fallback",
-			script: "#!/bin/sh\ncase \"$1\" in\n" +
-				"unlocked) echo \"error: unrecognized subcommand 'unlocked'\" >&2; exit 2 ;;\n" +
-				"status) printf 'unlocked\\n' ;;\n" +
-				"*) exit 1 ;;\n" +
-				"esac\n",
+			opts: testutil.RBWStubOptions{Status: "unlocked", LegacyStatusFallback: true},
 			code: "",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			bin := filepath.Join(dir, "rbw")
-			if err := os.WriteFile(bin, []byte(tc.script), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			status, err := checkReadinessWithClient(context.Background(), &RBWClient{Bin: bin})
+			stub := testutil.WriteRBWStub(t, tc.opts)
+			stub.SetEnv(t)
+			status, err := checkReadinessWithClient(context.Background(), &RBWClient{Bin: stub.Path()})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

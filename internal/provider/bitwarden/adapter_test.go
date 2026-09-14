@@ -2,33 +2,24 @@ package bitwarden
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"dotenv-sync/internal/config"
 	"dotenv-sync/internal/provider"
+	"dotenv-sync/internal/testutil"
 )
 
 func TestAdapterResolveUsesRepoItemAndFieldOverride(t *testing.T) {
-	dir := t.TempDir()
-	logFile := filepath.Join(dir, "rbw.log")
-	bin := filepath.Join(dir, "rbw")
-	script := "#!/bin/sh\n" +
-		"echo \"$@\" >> '" + logFile + "'\n" +
-		"if [ \"$1\" = \"get\" ] && [ \"$2\" = \"--field\" ] && [ \"$3\" = \"db_url\" ] && [ \"$4\" = \"my-repo\" ]; then\n" +
-		"  printf 'postgres://vault/dev\\n'\n" +
-		"  exit 0\n" +
-		"fi\n" +
-		"echo 'not found' >&2\n" +
-		"exit 1\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
+	stub := testutil.WriteRBWStub(t, testutil.RBWStubOptions{
+		Status: "unlocked",
+		Fields: map[string]string{
+			"my-repo::db_url": "postgres://vault/dev",
+		},
+	})
+	stub.SetEnv(t)
 	adapter := &Adapter{
-		client: &RBWClient{Bin: bin},
+		client: &RBWClient{Bin: stub.Path()},
 		cfg:    config.Config{ItemName: "my-repo"},
 		cache:  map[string]provider.Resolution{},
 	}
@@ -44,37 +35,24 @@ func TestAdapterResolveUsesRepoItemAndFieldOverride(t *testing.T) {
 	if _, err := adapter.Resolve(context.Background(), "DATABASE_URL", "db_url"); err != nil {
 		t.Fatalf("resolve from cache: %v", err)
 	}
-
-	data, err := os.ReadFile(logFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Fields(strings.TrimSpace(string(data)))
-	if got := strings.Count(string(data), "get --field db_url my-repo"); got != 1 {
-		t.Fatalf("expected one rbw invocation, log=%q parsed=%v", string(data), lines)
+	if got := strings.Count(stub.Log(t), "get --field db_url my-repo"); got != 1 {
+		t.Fatalf("expected one rbw invocation, got %d log=%q", got, stub.Log(t))
 	}
 }
 
 func TestAdapterResolveManyUsesNoteJSONPayloadOnce(t *testing.T) {
-	dir := t.TempDir()
-	logFile := filepath.Join(dir, "rbw.log")
-	bin := filepath.Join(dir, "rbw")
-	script := "#!/bin/sh\n" +
-		"echo \"$@\" >> '" + logFile + "'\n" +
-		"if [ \"$1\" = \"get\" ] && [ \"$2\" = \"--raw\" ] && [ \"$3\" = \"my-repo\" ]; then\n" +
-		"  cat <<'EOF'\n" +
-		"{\"name\":\"my-repo\",\"notes\":\"{\\\"format\\\":\\\"dotenv-sync/note-json@v1\\\",\\\"env\\\":{\\\"DATABASE_URL\\\":\\\"postgres://vault/dev\\\",\\\"JWT_SECRET\\\":\\\"supersecret\\\"}}\",\"data\":{\"password\":\"keep-me\"}}\n" +
-		"EOF\n" +
-		"  exit 0\n" +
-		"fi\n" +
-		"echo 'not found' >&2\n" +
-		"exit 1\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
+	stub := testutil.WriteRBWStub(t, testutil.RBWStubOptions{
+		Status: "unlocked",
+		Items: map[string]testutil.RBWStubItem{
+			"my-repo": {
+				Notes:    `{"format":"dotenv-sync/note-json@v1","env":{"DATABASE_URL":"postgres://vault/dev","JWT_SECRET":"supersecret"}}`,
+				Password: "keep-me",
+			},
+		},
+	})
+	stub.SetEnv(t)
 	adapter := &Adapter{
-		client: &RBWClient{Bin: bin},
+		client: &RBWClient{Bin: stub.Path()},
 		cfg:    config.Config{ItemName: "my-repo", StorageMode: config.StorageModeNoteJSON},
 		cache:  map[string]provider.Resolution{},
 	}
@@ -96,32 +74,21 @@ func TestAdapterResolveManyUsesNoteJSONPayloadOnce(t *testing.T) {
 	if _, err := adapter.Resolve(context.Background(), "DATABASE_URL", "ignored"); err != nil {
 		t.Fatalf("resolve from cached payload: %v", err)
 	}
-
-	data, err := os.ReadFile(logFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Count(string(data), "get --raw my-repo"); got != 1 {
-		t.Fatalf("expected one raw rbw invocation, got %d log=%q", got, string(data))
+	if got := strings.Count(stub.Log(t), "get --raw my-repo"); got != 1 {
+		t.Fatalf("expected one raw rbw invocation, got %d log=%q", got, stub.Log(t))
 	}
 }
 
 func TestAdapterLoadEnvPayloadRejectsMalformedNotes(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "rbw")
-	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = \"get\" ] && [ \"$2\" = \"--raw\" ] && [ \"$3\" = \"my-repo\" ]; then\n" +
-		"  printf '%s\\n' '{\"name\":\"my-repo\",\"notes\":\"not-json\",\"data\":{\"password\":\"keep-me\"}}'\n" +
-		"  exit 0\n" +
-		"fi\n" +
-		"echo 'not found' >&2\n" +
-		"exit 1\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
+	stub := testutil.WriteRBWStub(t, testutil.RBWStubOptions{
+		Status: "unlocked",
+		Items: map[string]testutil.RBWStubItem{
+			"my-repo": {Notes: "not-json", Password: "keep-me"},
+		},
+	})
+	stub.SetEnv(t)
 	adapter := &Adapter{
-		client: &RBWClient{Bin: bin},
+		client: &RBWClient{Bin: stub.Path()},
 		cfg:    config.Config{ItemName: "my-repo", StorageMode: config.StorageModeNoteJSON},
 		cache:  map[string]provider.Resolution{},
 	}
@@ -132,23 +99,16 @@ func TestAdapterLoadEnvPayloadRejectsMalformedNotes(t *testing.T) {
 }
 
 func TestAdapterLoadEnvPayloadSupportsFieldsMode(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "rbw")
-	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = \"get\" ] && [ \"$2\" = \"--raw\" ] && [ \"$3\" = \"shared-dev\" ]; then\n" +
-		"  printf '%s\\n' '{\"name\":\"shared-dev\",\"notes\":\"keep-me\",\"data\":{\"password\":\"shared-secret\"}}'\n" +
-		"  exit 0\n" +
-		"fi\n" +
-		"echo 'not found' >&2\n" +
-		"exit 1\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
+	stub := testutil.WriteRBWStub(t, testutil.RBWStubOptions{
+		Status: "unlocked",
+		Items: map[string]testutil.RBWStubItem{
+			"shared-dev": {Notes: "keep-me", Password: "shared-secret"},
+		},
+	})
+	stub.SetEnv(t)
 	adapter := &Adapter{
-		client: &RBWClient{Bin: bin},
+		client: &RBWClient{Bin: stub.Path()},
 		cfg:    config.Config{ItemName: "shared-dev", StorageMode: config.StorageModeFields},
-		cache:  map[string]provider.Resolution{},
 	}
 
 	payload, err := adapter.LoadEnvPayload(context.Background())
@@ -161,34 +121,15 @@ func TestAdapterLoadEnvPayloadSupportsFieldsMode(t *testing.T) {
 }
 
 func TestAdapterStoreEnvPayloadSupportsFieldsModePasswordWrites(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "rbw")
-	logPath := filepath.Join(dir, "rbw.log")
-	editCapture := filepath.Join(dir, "edit.txt")
-	script := "#!/bin/sh\n" +
-		"echo \"$@\" >> '" + logPath + "'\n" +
-		"tmp=$(mktemp)\n" +
-		"case \"$1\" in\n" +
-		"edit)\n" +
-		"  \"${VISUAL:-$EDITOR}\" \"$tmp\"\n" +
-		"  cat \"$tmp\" > '" + editCapture + "'\n" +
-		"  ;;\n" +
-		"sync) exit 0 ;;\n" +
-		"*) echo 'unsupported' >&2; exit 1 ;;\n" +
-		"esac\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	ptyWrapper := filepath.Join(dir, "script")
-	ptyWrapperContent := "#!/bin/sh\n" +
-		"exec /bin/sh -c \"$3\"\n"
-	if err := os.WriteFile(ptyWrapper, []byte(ptyWrapperContent), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
+	stub := testutil.WriteRBWStub(t, testutil.RBWStubOptions{
+		Status: "unlocked",
+		Items: map[string]testutil.RBWStubItem{
+			"shared-dev": {Notes: "keep-me", Password: "old-secret"},
+		},
+	})
+	stub.SetEnv(t)
 	adapter := &Adapter{
-		client: &RBWClient{Bin: bin},
+		client: &RBWClient{Bin: stub.Path()},
 		cfg: config.Config{
 			ItemName:    "shared-dev",
 			StorageMode: config.StorageModeFields,
@@ -196,7 +137,6 @@ func TestAdapterStoreEnvPayloadSupportsFieldsModePasswordWrites(t *testing.T) {
 				"DB_PASSWD": "password",
 			},
 		},
-		cache: map[string]provider.Resolution{},
 	}
 
 	_, err := adapter.StoreEnvPayload(context.Background(), provider.EnvPayload{
@@ -212,34 +152,23 @@ func TestAdapterStoreEnvPayloadSupportsFieldsModePasswordWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store fields payload: %v", err)
 	}
-	editData, err := os.ReadFile(editCapture)
-	if err != nil {
-		t.Fatal(err)
+	if got := stub.Password(t, "shared-dev"); got != "rotated-secret" {
+		t.Fatalf("unexpected password after update: %q", got)
 	}
-	if string(editData) != "rotated-secret\n\nkeep-me\n" {
-		t.Fatalf("unexpected editor content: %q", string(editData))
+	if got := stub.Note(t, "shared-dev"); got != "keep-me" {
+		t.Fatalf("unexpected notes after update: %q", got)
 	}
-	logData, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(logData), "edit shared-dev") || !strings.Contains(string(logData), "sync") {
+	logData := stub.Log(t)
+	if !strings.Contains(logData, "edit shared-dev") || !strings.Contains(logData, "sync") {
 		t.Fatalf("unexpected rbw log: %s", logData)
 	}
 }
 
 func TestAdapterResolveTreatsNoEntryFoundAsMissing(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "rbw")
-	script := "#!/bin/sh\n" +
-		"echo \"rbw get: couldn't find entry for '$4': no entry found\" >&2\n" +
-		"exit 1\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
+	stub := testutil.WriteRBWStub(t, testutil.RBWStubOptions{Status: "unlocked"})
+	stub.SetEnv(t)
 	adapter := &Adapter{
-		client: &RBWClient{Bin: bin},
+		client: &RBWClient{Bin: stub.Path()},
 		cfg:    config.Config{ItemName: "my-repo"},
 		cache:  map[string]provider.Resolution{},
 	}
@@ -249,6 +178,6 @@ func TestAdapterResolveTreatsNoEntryFoundAsMissing(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 	if resolution.Source != "missing" || resolution.IssueCode != "E005" {
-		t.Fatalf("expected missing resolution, got %+v", resolution)
+		t.Fatalf("expected missing/E005, got %+v", resolution)
 	}
 }
