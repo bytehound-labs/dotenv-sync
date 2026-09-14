@@ -29,6 +29,8 @@ func TestContractReleaseWorkflow(t *testing.T) {
 		"stable semver tag",
 		"CGO_ENABLED=0",
 		"cp LICENSE README.md",
+		"zip -q -j \"../../dist/$(basename \"${asset}\")\"",
+		"test -s \"${asset}\"",
 		"ds_${VERSION}_SHA256SUMS",
 		"anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26",
 		"format: cyclonedx-json",

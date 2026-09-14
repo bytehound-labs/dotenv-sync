@@ -124,7 +124,7 @@ jobs:
 
             if [ "${GOOS}" = "windows" ]; then
               asset="dist/ds_${VERSION}_windows_${GOARCH}.zip"
-              (cd "${workdir}" && zip -q -j "../../$(basename "${asset}")" "ds${ext}" LICENSE README.md)
+              (cd "${workdir}" && zip -q -j "../../dist/$(basename "${asset}")" "ds${ext}" LICENSE README.md)
             else
               asset="dist/ds_${VERSION}_${GOOS}_${GOARCH}.tar.gz"
               tar -C "${workdir}" -czf "${asset}" "ds${ext}" LICENSE README.md
@@ -136,6 +136,15 @@ jobs:
             cd dist
             sha256sum ds_* > "$(basename "${checksum_file}")"
           )
+
+          for asset in \
+            "dist/ds_${VERSION}_linux_amd64.tar.gz" \
+            "dist/ds_${VERSION}_linux_arm64.tar.gz" \
+            "dist/ds_${VERSION}_darwin_amd64.tar.gz" \
+            "dist/ds_${VERSION}_darwin_arm64.tar.gz" \
+            "dist/ds_${VERSION}_windows_amd64.zip"; do
+            test -s "${asset}"
+          done
 
       - name: Verify the Linux reference artifact reports its version
         env:
