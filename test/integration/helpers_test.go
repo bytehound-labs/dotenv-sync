@@ -56,7 +56,7 @@ func readRepoFile(t *testing.T, parts ...string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(data)
+	return strings.ReplaceAll(string(data), "\r\n", "\n")
 }
 
 func renderTemplate(input string, replacements map[string]string) string {
