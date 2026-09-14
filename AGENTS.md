@@ -22,6 +22,21 @@ repository-specific implementation guidance for coding agents and contributors.
 - Prefer existing patterns and helpers over new abstractions. Add dependencies
   only when they solve a demonstrated need.
 
+## Pull request completion
+
+- Own each pull request through completion unless the user explicitly asks to
+  stop before merging.
+- After pushing a pull request, monitor every relevant GitHub Actions check
+  until it finishes. Do not merge while a required check is pending or failing.
+- When a check fails, inspect its logs, fix the root cause, run the relevant
+  local validation, commit the fix, push it, and resume monitoring. Repeat this
+  loop until all required checks pass.
+- Once checks pass and the pull request is mergeable, merge it with the GitHub
+  CLI, then verify that the merge completed successfully and the working branch
+  reflects the new base state.
+- For a sequence of focused pull requests, merge the current pull request
+  before starting work on the next one.
+
 ## Architecture
 
 | Area                | Responsibility                                                  |
