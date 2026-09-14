@@ -35,6 +35,7 @@ func TestContractReleaseWorkflow(t *testing.T) {
 		"anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26",
 		"format: cyclonedx-json",
 		"release-sbom.cdx.json",
+		"syft-version: v1.50.0",
 		"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8",
 		"subject-checksums: release-assets.sha256",
 		"release-provenance.bundle.json",
