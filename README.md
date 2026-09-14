@@ -526,6 +526,9 @@ Use the built-in session-scoped planning and execution workflow for
 non-trivial changes. Keep transient plans and task lists outside the repository;
 commit only durable project documentation and code.
 
+Repository-specific contributor and coding-agent guidance lives in
+[AGENTS.md](AGENTS.md).
+
 ```bash
 gofmt -w ./path/to/changed.go
 go test ./...
