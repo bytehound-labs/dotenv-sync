@@ -19,10 +19,11 @@ func TestContractSecurityWorkflows(t *testing.T) {
 				"schedule:",
 				"security-events: write",
 				"actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803",
-				"github/codeql-action/init@faaca9a8f6edddba5725ffe5adefdab6669a2eca",
+				"github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63",
+				"github/codeql-action/autobuild@b96794f015dfd88f77b49b1c93e0fa7110f94c63",
 				"languages: go",
 				"build-mode: autobuild",
-				"github/codeql-action/analyze@faaca9a8f6edddba5725ffe5adefdab6669a2eca",
+				"github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63",
 			},
 		},
 		{
