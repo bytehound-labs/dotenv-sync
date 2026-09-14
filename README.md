@@ -526,8 +526,40 @@ git push origin main
 patch version, reruns `go test ./...`, builds versioned archives for Linux,
 macOS, and Windows, bundles `README.md` and `LICENSE` into the release
 archives, writes `ds_<version>_SHA256SUMS`, verifies the Linux reference
-artifact with `ds --version`, and then creates or refreshes the matching GitHub
-release.
+artifact with `ds --version`, generates a CycloneDX SBOM, publishes GitHub
+OIDC provenance attestations, creates keyless Cosign signature bundles, and
+then creates or refreshes the matching GitHub release. Release evidence is
+published alongside the archives as `release-sbom.cdx.json`,
+`release-assets.sha256`, `release-provenance.bundle.json`, and
+`*.sigstore.json` files.
+
+To verify a downloaded release, first check the archive checksum:
+
+```bash
+sha256sum --check ds_<version>_SHA256SUMS
+```
+
+GitHub provenance can be verified against the published attestation and the
+release workflow identity:
+
+```bash
+gh attestation verify ds_<version>_linux_amd64.tar.gz \
+  --repo bytehound-labs/dotenv-sync \
+  --signer-workflow bytehound-labs/dotenv-sync/.github/workflows/release.yml
+```
+
+For offline verification, download `release-provenance.bundle.json` and pass
+it with `--bundle` instead. The CycloneDX document can be inspected with any
+CycloneDX-compatible tool or a JSON viewer. To verify a keyless Cosign bundle,
+install Cosign and run:
+
+```bash
+cosign verify-blob \
+  --bundle ds_<version>_linux_amd64.tar.gz.sigstore.json \
+  --certificate-identity-regexp 'https://github.com/bytehound-labs/dotenv-sync/.github/workflows/release.yml@refs/heads/main' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ds_<version>_linux_amd64.tar.gz
+```
 
 If `AUR_SSH_PRIVATE_KEY` is configured, `.github/workflows/aur-publish.yml` is
 invoked directly from `.github/workflows/release.yml` after the GitHub release
