@@ -31,6 +31,11 @@ func TestContractAurPublishWorkflow(t *testing.T) {
 		"--readme-sha256",
 		"go run ./scripts/aurpkg",
 		"ssh://aur@aur.archlinux.org/dotenv-sync-bin.git",
+		"AUR_HOST_KEY: aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN",
+		"AUR_HOST_KEY_FINGERPRINT: SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4",
+		"ssh-keygen -lf",
+		"StrictHostKeyChecking yes",
+		"UserKnownHostsFile",
 		"upgpkg: dotenv-sync-bin ${PKGVER}-${PKGREL}",
 		"secrets:",
 	} {
@@ -41,6 +46,7 @@ func TestContractAurPublishWorkflow(t *testing.T) {
 
 	for _, unwanted := range []string{
 		"main",
+		"ssh-keyscan",
 	} {
 		if strings.Contains(content, unwanted) {
 			t.Fatalf("workflow unexpectedly contains %q", unwanted)

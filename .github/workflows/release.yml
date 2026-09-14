@@ -15,8 +15,10 @@ jobs:
     permissions:
       contents: write
       actions: read
+      id-token: write
+      attestations: write
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     outputs:
       version: ${{ steps.version.outputs.version }}
       already_released: ${{ steps.version.outputs.already_released }}
@@ -130,27 +132,84 @@ jobs:
           done
 
           checksum_file="dist/ds_${VERSION}_SHA256SUMS"
-          sha256sum dist/ds_* > "${checksum_file}"
+          (
+            cd dist
+            sha256sum ds_* > "$(basename "${checksum_file}")"
+          )
 
       - name: Verify the Linux reference artifact reports its version
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          mkdir -p dist/verify
-          tar -C dist/verify -xzf "dist/ds_${VERSION}_linux_amd64.tar.gz"
-          test "$(dist/verify/ds --version)" = "ds ${VERSION}"
+          rm -rf .release/verify
+          mkdir -p .release/verify
+          tar -C .release/verify -xzf "dist/ds_${VERSION}_linux_amd64.tar.gz"
+          test "$(.release/verify/ds --version)" = "ds ${VERSION}"
+
+      - name: Generate release SBOM
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26
+        with:
+          path: dist
+          format: cyclonedx-json
+          output-file: release-sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Create release asset checksums
+        run: |
+          set -euo pipefail
+          (
+            cd dist
+            sha256sum -- * > ../release-assets.sha256
+          )
+
+      - name: Attest release asset provenance
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-checksums: release-assets.sha256
+
+      - name: Save the provenance bundle for the release
+        env:
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: cp "${BUNDLE_PATH}" release-provenance.bundle.json
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+        with:
+          cosign-release: v3.1.3
+
+      - name: Sign every release asset
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' asset; do
+            cosign sign-blob \
+              --yes \
+              --bundle "${asset}.sigstore.json" \
+              "${asset}"
+          done < <(find dist -maxdepth 1 -type f -print0 | sort -z)
 
       - name: Publish GitHub release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
           ALREADY_RELEASED: ${{ steps.version.outputs.already_released }}
         run: |
           set -euo pipefail
+          shopt -s nullglob
+          release_files=(
+            dist/ds_"${VERSION}"_*.tar.gz
+            dist/ds_"${VERSION}"_*.zip
+            dist/ds_"${VERSION}"_SHA256SUMS
+            release-sbom.cdx.json
+            release-assets.sha256
+            release-provenance.bundle.json
+            dist/*.sigstore.json
+          )
           if gh release view "${VERSION}" >/dev/null 2>&1; then
             echo "Refreshing existing GitHub release ${VERSION}"
-            gh release upload "${VERSION}" dist/ds_* --clobber
+            gh release upload "${VERSION}" "${release_files[@]}" --clobber
             exit 0
           fi
 
@@ -160,7 +219,7 @@ jobs:
             echo "Publishing new GitHub release ${VERSION}"
           fi
 
-          gh release create "${VERSION}" dist/ds_* --title "${VERSION}" --generate-notes --target "${GITHUB_SHA}"
+          gh release create "${VERSION}" "${release_files[@]}" --title "${VERSION}" --generate-notes --target "${GITHUB_SHA}"
 
   publish_aur:
     name: Publish AUR package

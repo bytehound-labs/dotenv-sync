@@ -133,12 +133,28 @@ jobs:
         if: steps.meta.outputs.publish == 'true' && steps.aur.outputs.configured == 'true'
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_HOST_KEY: aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN
+          AUR_HOST_KEY_FINGERPRINT: SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4
         run: |
           set -euo pipefail
           install -d -m 700 "${HOME}/.ssh"
           printf '%s\n' "${AUR_SSH_PRIVATE_KEY}" > "${HOME}/.ssh/id_ed25519"
           chmod 600 "${HOME}/.ssh/id_ed25519"
-          ssh-keyscan aur.archlinux.org >> "${HOME}/.ssh/known_hosts"
+          printf '%s\n' "${AUR_HOST_KEY}" > "${HOME}/.ssh/known_hosts"
+          actual_fingerprint="$(
+            ssh-keygen -lf "${HOME}/.ssh/known_hosts" -E sha256 |
+              awk 'NR == 1 { print $2 }'
+          )"
+          if [ "${actual_fingerprint}" != "${AUR_HOST_KEY_FINGERPRINT}" ]; then
+            echo "::error::Pinned AUR host key fingerprint does not match the expected value."
+            exit 1
+          fi
+          {
+            printf 'Host aur.archlinux.org\n'
+            printf '  StrictHostKeyChecking yes\n'
+            printf '  UserKnownHostsFile %s\n' "${HOME}/.ssh/known_hosts"
+          } > "${HOME}/.ssh/config"
+          chmod 600 "${HOME}/.ssh/config"
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
