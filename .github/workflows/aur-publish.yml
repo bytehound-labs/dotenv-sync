@@ -12,6 +12,10 @@ on:
         required: false
         default: '1'
         type: string
+    secrets:
+      AUR_SSH_PRIVATE_KEY:
+        description: SSH private key for the dotenv-sync-bin AUR repository
+        required: false
   release:
     types:
       - published
@@ -55,23 +59,26 @@ jobs:
             echo "::error::AUR publish requires pkgrel >= 1, got ${PKGREL}"
             exit 1
           fi
-          echo "publish=true" >> "${GITHUB_OUTPUT}"
-          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "pkgver=${VERSION#v}" >> "${GITHUB_OUTPUT}"
-          echo "pkgrel=${PKGREL}" >> "${GITHUB_OUTPUT}"
-          echo "amd64_asset=ds_${VERSION}_linux_amd64.tar.gz" >> "${GITHUB_OUTPUT}"
-          echo "arm64_asset=ds_${VERSION}_linux_arm64.tar.gz" >> "${GITHUB_OUTPUT}"
+          {
+            echo "publish=true"
+            echo "version=${VERSION}"
+            echo "pkgver=${VERSION#v}"
+            echo "pkgrel=${PKGREL}"
+            echo "amd64_asset=ds_${VERSION}_linux_amd64.tar.gz"
+            echo "arm64_asset=ds_${VERSION}_linux_arm64.tar.gz"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
 
       - name: Check AUR credentials
         if: steps.meta.outputs.publish == 'true'
@@ -91,27 +98,36 @@ jobs:
         if: steps.meta.outputs.publish == 'true' && steps.aur.outputs.configured == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.meta.outputs.version }}
+          AMD64_ASSET: ${{ steps.meta.outputs.amd64_asset }}
+          ARM64_ASSET: ${{ steps.meta.outputs.arm64_asset }}
         run: |
           set -euo pipefail
           mkdir -p dist
-          gh release download "${{ steps.meta.outputs.version }}" \
-            --pattern "${{ steps.meta.outputs.amd64_asset }}" \
-            --pattern "${{ steps.meta.outputs.arm64_asset }}" \
+          gh release download "${RELEASE_TAG}" \
+            --pattern "${AMD64_ASSET}" \
+            --pattern "${ARM64_ASSET}" \
             --dir dist
 
       - name: Compute package checksums
         if: steps.meta.outputs.publish == 'true' && steps.aur.outputs.configured == 'true'
         id: sums
+        env:
+          RELEASE_TAG: ${{ steps.meta.outputs.version }}
+          AMD64_ASSET: ${{ steps.meta.outputs.amd64_asset }}
+          ARM64_ASSET: ${{ steps.meta.outputs.arm64_asset }}
         run: |
           set -euo pipefail
-          license="$(git show "${{ steps.meta.outputs.version }}:LICENSE" | sha256sum | awk '{print $1}')"
-          readme="$(git show "${{ steps.meta.outputs.version }}:README.md" | sha256sum | awk '{print $1}')"
-          amd64="$(sha256sum "dist/${{ steps.meta.outputs.amd64_asset }}" | awk '{print $1}')"
-          arm64="$(sha256sum "dist/${{ steps.meta.outputs.arm64_asset }}" | awk '{print $1}')"
-          echo "license=${license}" >> "${GITHUB_OUTPUT}"
-          echo "readme=${readme}" >> "${GITHUB_OUTPUT}"
-          echo "amd64=${amd64}" >> "${GITHUB_OUTPUT}"
-          echo "arm64=${arm64}" >> "${GITHUB_OUTPUT}"
+          license="$(git show "${RELEASE_TAG}:LICENSE" | sha256sum | awk '{print $1}')"
+          readme="$(git show "${RELEASE_TAG}:README.md" | sha256sum | awk '{print $1}')"
+          amd64="$(sha256sum "dist/${AMD64_ASSET}" | awk '{print $1}')"
+          arm64="$(sha256sum "dist/${ARM64_ASSET}" | awk '{print $1}')"
+          {
+            echo "license=${license}"
+            echo "readme=${readme}"
+            echo "amd64=${amd64}"
+            echo "arm64=${arm64}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Configure AUR SSH access
         if: steps.meta.outputs.publish == 'true' && steps.aur.outputs.configured == 'true'
@@ -134,15 +150,22 @@ jobs:
 
       - name: Render AUR package files
         if: steps.meta.outputs.publish == 'true' && steps.aur.outputs.configured == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.meta.outputs.version }}
+          PKGREL: ${{ steps.meta.outputs.pkgrel }}
+          LICENSE_SHA256: ${{ steps.sums.outputs.license }}
+          README_SHA256: ${{ steps.sums.outputs.readme }}
+          X86_64_SHA256: ${{ steps.sums.outputs.amd64 }}
+          AARCH64_SHA256: ${{ steps.sums.outputs.arm64 }}
         run: |
           set -euo pipefail
           go run ./scripts/aurpkg \
-            --version "${{ steps.meta.outputs.version }}" \
-            --pkgrel "${{ steps.meta.outputs.pkgrel }}" \
-            --license-sha256 "${{ steps.sums.outputs.license }}" \
-            --readme-sha256 "${{ steps.sums.outputs.readme }}" \
-            --x86_64-sha256 "${{ steps.sums.outputs.amd64 }}" \
-            --aarch64-sha256 "${{ steps.sums.outputs.arm64 }}" \
+            --version "${RELEASE_TAG}" \
+            --pkgrel "${PKGREL}" \
+            --license-sha256 "${LICENSE_SHA256}" \
+            --readme-sha256 "${README_SHA256}" \
+            --x86_64-sha256 "${X86_64_SHA256}" \
+            --aarch64-sha256 "${AARCH64_SHA256}" \
             --output-dir aur-repo
 
       - name: Commit and push AUR update

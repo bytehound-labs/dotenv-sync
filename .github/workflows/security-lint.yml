@@ -1,0 +1,63 @@
+name: Workflow security lint
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/**'
+      - '.github/dependabot.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/**'
+      - '.github/dependabot.yml'
+  schedule:
+    - cron: '59 3 * * 1'
+
+concurrency:
+  group: workflow-security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Audit GitHub automation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Install actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Check workflow syntax with actionlint
+        run: actionlint
+
+      - name: Install zizmor
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/zizmor"
+          "${RUNNER_TEMP}/zizmor/bin/pip" install \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            "zizmor==1.29.0"
+
+      - name: Audit workflows with zizmor
+        run: |
+          set -euo pipefail
+          "${RUNNER_TEMP}/zizmor/bin/zizmor" --offline --collect=workflows .github/workflows

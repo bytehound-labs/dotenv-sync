@@ -1,0 +1,61 @@
+name: Gitleaks
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: '11 3 * * 1'
+
+concurrency:
+  group: gitleaks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Scan repository history
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Install Gitleaks
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if go install github.com/zricethezav/gitleaks/v8@v8.28.0; then
+              break
+            fi
+            if [ "${attempt}" -eq 3 ]; then
+              echo "Gitleaks installation failed after ${attempt} attempts" >&2
+              exit 1
+            fi
+            sleep "$((attempt * 10))"
+          done
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Scan repository history
+        run: |
+          set -euo pipefail
+          gitleaks detect \
+            --source . \
+            --log-opts="--all" \
+            --redact \
+            --verbose

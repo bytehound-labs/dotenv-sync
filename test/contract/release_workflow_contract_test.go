@@ -13,6 +13,10 @@ func TestContractReleaseWorkflow(t *testing.T) {
 		"branches:",
 		"- main",
 		"timeout-minutes: 15",
+		"contents: write",
+		"actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803",
+		"actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16",
+		"persist-credentials: false",
 		"Wait for older release runs",
 		"actions/workflows/release.yml/runs",
 		"go test ./...",
@@ -29,6 +33,7 @@ func TestContractReleaseWorkflow(t *testing.T) {
 		"ds --version",
 		"uses: ./.github/workflows/aur-publish.yml",
 		"release_tag: ${{ needs.release.outputs.version }}",
+		"AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("workflow missing %q", want)
