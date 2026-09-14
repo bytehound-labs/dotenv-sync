@@ -38,7 +38,17 @@ jobs:
 
       - name: Install Gitleaks
         run: |
-          go install github.com/zricethezav/gitleaks/v8@v8.28.0
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if go install github.com/zricethezav/gitleaks/v8@v8.28.0; then
+              break
+            fi
+            if [ "${attempt}" -eq 3 ]; then
+              echo "Gitleaks installation failed after ${attempt} attempts" >&2
+              exit 1
+            fi
+            sleep "$((attempt * 10))"
+          done
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Scan repository history

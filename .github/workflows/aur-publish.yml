@@ -59,12 +59,14 @@ jobs:
             echo "::error::AUR publish requires pkgrel >= 1, got ${PKGREL}"
             exit 1
           fi
-          echo "publish=true" >> "${GITHUB_OUTPUT}"
-          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "pkgver=${VERSION#v}" >> "${GITHUB_OUTPUT}"
-          echo "pkgrel=${PKGREL}" >> "${GITHUB_OUTPUT}"
-          echo "amd64_asset=ds_${VERSION}_linux_amd64.tar.gz" >> "${GITHUB_OUTPUT}"
-          echo "arm64_asset=ds_${VERSION}_linux_arm64.tar.gz" >> "${GITHUB_OUTPUT}"
+          {
+            echo "publish=true"
+            echo "version=${VERSION}"
+            echo "pkgver=${VERSION#v}"
+            echo "pkgrel=${PKGREL}"
+            echo "amd64_asset=ds_${VERSION}_linux_amd64.tar.gz"
+            echo "arm64_asset=ds_${VERSION}_linux_arm64.tar.gz"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -120,10 +122,12 @@ jobs:
           readme="$(git show "${RELEASE_TAG}:README.md" | sha256sum | awk '{print $1}')"
           amd64="$(sha256sum "dist/${AMD64_ASSET}" | awk '{print $1}')"
           arm64="$(sha256sum "dist/${ARM64_ASSET}" | awk '{print $1}')"
-          echo "license=${license}" >> "${GITHUB_OUTPUT}"
-          echo "readme=${readme}" >> "${GITHUB_OUTPUT}"
-          echo "amd64=${amd64}" >> "${GITHUB_OUTPUT}"
-          echo "arm64=${arm64}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "license=${license}"
+            echo "readme=${readme}"
+            echo "amd64=${amd64}"
+            echo "arm64=${arm64}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Configure AUR SSH access
         if: steps.meta.outputs.publish == 'true' && steps.aur.outputs.configured == 'true'

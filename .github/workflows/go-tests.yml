@@ -37,7 +37,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          files="$(gofmt -l $(git ls-files '*.go'))"
+          mapfile -t go_files < <(git ls-files '*.go')
+          files="$(gofmt -l "${go_files[@]}")"
           if [ -n "${files}" ]; then
             printf 'Unformatted Go files:\n%s\n' "${files}"
             exit 1
