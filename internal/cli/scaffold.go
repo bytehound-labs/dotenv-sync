@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"dotenv-sync/internal/config"
 	"dotenv-sync/internal/envfile"
 	"dotenv-sync/internal/provider/keepass"
 	"dotenv-sync/internal/report"
@@ -14,10 +15,11 @@ func newScaffoldCommand(s streams, opts *rootOptions) *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "scaffold",
-		Short: "Seed KeePass with blank entries for all provider-managed schema keys",
+		Short: "Seed KeePass with blank entries for provider-managed schema keys",
 		Long: `scaffold reads .env.example and creates a blank KeePass entry for every
-provider-managed key (blank value in .env.example) that does not already exist
-in the configured group. Existing entries are skipped, never overwritten.
+provider-managed key (blank value in .env.example, excluding local_keys) that
+does not already exist in the configured group. Existing entries are skipped,
+never overwritten.
 
 After scaffold, open KeePassXC, fill in the real secret values, then run ds sync.
 This bootstraps the entry structure only — it does not push current .env values
@@ -46,11 +48,18 @@ Only supported when provider is keepass.`,
 					"scaffold cannot determine which keys to create",
 					"create .env.example or run 'ds init'", err)
 			}
+			if issues := cfg.ValidateLocalKeys(schema); len(issues) > 0 {
+				issue := issues[0]
+				return report.NewAppError("E012", report.ExitValidation,
+					issue.Message+": "+issue.Key,
+					"scaffold cannot determine a valid provider/local schema split",
+					issue.Action, nil)
+			}
 
-			// Collect keys that need entries — blank value = provider-managed.
+			// Collect keys that need entries — local keys never enter KeePass.
 			var keys []string
 			for _, line := range schema.Lines {
-				if line.LineType == envfile.LineAssignment && line.ManagedByProvider {
+				if line.LineType == envfile.LineAssignment && cfg.ClassifySource(line.Key, line.ManagedByProvider) == config.SourceProvider {
 					keys = append(keys, line.Key)
 				}
 			}

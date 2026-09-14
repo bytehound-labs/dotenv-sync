@@ -36,6 +36,11 @@ func PlanPushDocs(ctx context.Context, cfg config.Config, schema, local envfile.
 	if len(plan.Issues) > 0 {
 		return plan, provider.EnvPayload{}, issueAsAppError(plan.Issues[0], "push cannot upload the current .env")
 	}
+	_, schemaIssues := classifySchema(cfg, schema)
+	plan.Issues = append(plan.Issues, schemaIssues...)
+	if len(schemaIssues) > 0 {
+		return plan, provider.EnvPayload{}, issueAsValidationError(schemaIssues[0], "push cannot upload the current .env")
+	}
 	localEnv := CanonicalDocumentEnv(local)
 	fieldRefs := map[string]string{}
 	fieldTargetEnv := map[string]string{}
@@ -85,7 +90,7 @@ func PlanPushDocs(ctx context.Context, cfg config.Config, schema, local envfile.
 		Exists:      current.Exists,
 		Format:      NoteJSONFormat,
 		Password:    current.Password,
-		Env:         localEnv,
+		Env:         CanonicalDocumentEnvExcept(local, cfg.IsLocalKey),
 	}
 	plan.Changes = buildPushChanges(schema.AssignmentMap(), localEnv, target.Env, current.Env)
 	plan.WriteRequired = !NoteJSONEqual(target.Env, current.Env) || !current.Exists
@@ -193,7 +198,7 @@ func buildFieldsPushTarget(cfg config.Config, schema, local envfile.Document) (m
 	targetEnv := map[string]string{}
 	fieldValues := map[string]string{}
 	for _, line := range schema.Lines {
-		if line.LineType != envfile.LineAssignment || !line.ManagedByProvider {
+		if line.LineType != envfile.LineAssignment || cfg.ClassifySource(line.Key, line.ManagedByProvider) != config.SourceProvider {
 			continue
 		}
 		localLine, ok := localAssignments[line.Key]

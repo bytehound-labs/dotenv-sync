@@ -15,6 +15,8 @@ func MarkerForSource(source string) string {
 		return "[STATIC]"
 	case "provider", "resolved":
 		return "[RESOLVED]"
+	case "local":
+		return "[LOCAL]"
 	case "missing", "unmapped":
 		return "[MISSING]"
 	default:

@@ -31,10 +31,12 @@ further down.
 DATABASE_URL=
 JWT_SECRET=
 PORT=8080
+FILE=
 ```
 
-Blank values are treated as provider-managed secrets. Literal values are treated
-as safe defaults and copied into `.env`.
+Blank values are treated as provider-managed secrets unless the key is listed
+under `local_keys` in `.envsync.yaml`. Literal values are treated as safe
+defaults and copied into `.env`.
 
 ### 2. Point `ds` at your provider
 
@@ -48,6 +50,8 @@ item_name: my-app
 mapping:
   DATABASE_URL: db_url
   JWT_SECRET: auth_jwt
+local_keys:
+  - FILE
 ```
 
 KeePass example:
@@ -84,6 +88,30 @@ ds missing
   and unresolved secrets
 - `ds missing` lists unresolved schema keys only
 
+Host-local values use the same blank schema assignment on every host, while each
+host keeps its own value only in its ignored `.env`:
+
+```yaml
+local_keys:
+  - FILE
+```
+
+```dotenv
+# Host A
+FILE=1
+```
+
+```dotenv
+# Host B
+FILE=2
+```
+
+Local values are never read from, written to, or compared through a provider.
+When a local value is missing or blank, `ds sync`, `ds diff`, and `ds validate`
+print a redacted warning telling the operator to set it in `.env`; the commands
+still succeed and `ds sync` writes `FILE=` when needed. `ds missing` reports
+provider-backed keys only.
+
 ## Command overview
 
 | Command                       | What it is for                                                                      |
@@ -111,6 +139,19 @@ ds missing
 `.envsync.yaml` is optional. Running `ds init` or `ds scaffold` with no config
 present will walk you through first-run setup and write it for you.
 
+### Value sources
+
+Each schema assignment has one source:
+
+| Source   | Schema value | Configuration              | Behavior                                                          |
+| -------- | ------------ | -------------------------- | ----------------------------------------------------------------- |
+| Static   | nonblank     | none                       | Copy the committed value into `.env`                              |
+| Provider | blank        | not listed in `local_keys` | Resolve through Bitwarden or KeePass                              |
+| Local    | blank        | listed in `local_keys`     | Preserve the current host's `.env` value and never use a provider |
+
+Every `local_keys` entry must appear exactly once in `.env.example` with a blank
+value and must not also appear in `mapping`.
+
 ### Bitwarden
 
 ```yaml
@@ -122,6 +163,8 @@ storage_mode: fields
 mapping:
   DATABASE_URL: db_url
   JWT_SECRET: auth_jwt
+local_keys:
+  - FILE
 ```
 
 ### KeePass
@@ -147,13 +190,16 @@ For Bitwarden, if `item_name` is omitted, `ds` derives it from the Git
 repository root directory name and falls back to the current working directory
 name when Git metadata is unavailable. By default, Bitwarden-managed keys
 resolve as `rbw get <item_name> --field <ENV_VAR>`, and `mapping` overrides
-only the field name inside that Bitwarden item.
+only the field name inside that Bitwarden item. Keys listed under `local_keys`
+bypass provider resolution.
 
 Bitwarden `storage_mode` defaults to `fields` for backward-compatible reads
 from the repo-scoped item fields. In `fields` mode, `ds push` can update
 provider-managed keys that map to Bitwarden's built-in `password` field. Set
 `storage_mode: note_json` to store the full repo env map in the item notes for
-round-trip `push`/`sync` workflows.
+round-trip `push`/`sync` workflows. Local keys are omitted from the payload; if
+an older payload contains one, the next `ds push` removes that stale provider
+copy.
 
 That makes shared aliases across repos possible with the default field-based
 layout. For example, both repos below read and write the same Bitwarden value:
@@ -289,12 +335,15 @@ ds sync --dry-run
 ```
 
 - Reads `.env.example` as the schema contract
-- Resolves blank entries through the configured provider
+- Resolves provider-managed blank entries and preserves configured `local_keys`
+  from the current `.env`
 - Preserves comment order and line endings when rewriting `.env`
 - Produces `WRITTEN`, `UNCHANGED`, and `MISSING` output vocabulary for sync runs
 - On successful writes, prints the changed keys before the final summary without
   exposing raw values
 - Uses `CHECKED` summaries for dry-run previews
+- Warns without failing when a configured local key is missing or blank, and
+  writes a blank assignment when needed
 
 ### `ds push`
 
@@ -309,6 +358,8 @@ ds push
 - Reads `.env` as the upload source and `.env.example` as schema context
 - In `note_json`, writes a deterministic JSON payload into the repo-scoped
   Bitwarden item notes
+- Excludes `local_keys` from both storage modes and removes stale local entries
+  from an existing `note_json` payload
 - In `fields`, updates provider-managed keys present in `.env` when they map to
   Bitwarden's built-in `password` field
 - Never prints raw values; previews use redacted markers such as `[REDACTED]`
@@ -330,7 +381,8 @@ ds diff
 ```
 
 Prints only real changes using redacted markers such as `[RESOLVED]` and
-`[STATIC]`.
+`[STATIC]`. Missing or blank `local_keys` produce warning-only output and a
+successful exit.
 
 ### `ds validate`
 
@@ -339,7 +391,8 @@ ds validate
 ```
 
 Returns exit code `2` when drift, malformed input, duplicates, or unresolved
-secrets are found.
+provider secrets are found. Missing or blank `local_keys` are warnings and do
+not fail validation.
 
 ### `ds doctor`
 
@@ -357,8 +410,8 @@ ds init
 ds init --dry-run
 ```
 
-Creates `.env.example` from `.env`, blanking secret-like values while copying
-safe defaults.
+Creates `.env.example` from `.env`, blanking secret-like values and configured
+`local_keys` while copying safe defaults.
 
 If no `.envsync.yaml` exists and stdin is a terminal, `ds init` runs first-run
 setup — asking which provider to use and writing the config file before
@@ -377,8 +430,8 @@ ds scaffold --dry-run
 ```
 
 Seeds a KeePass vault with blank entries for every provider-managed key in
-`.env.example`. Existing entries are skipped — never overwritten. Only
-supported when `provider: keepass`.
+`.env.example`. Configured `local_keys` are excluded. Existing entries are
+skipped — never overwritten. Only supported when `provider: keepass`.
 
 This is a bootstrap step, not a KeePass version of `ds push`: it creates the
 entry structure, but it does not update existing KeePass entry values from
@@ -400,7 +453,7 @@ ds missing
 ```
 
 Lists only unresolved provider-managed schema keys and exits with code `2` when
-any key is missing.
+any provider key is missing. Configured local keys are never reported here.
 
 ### `ds reverse`
 
@@ -410,6 +463,8 @@ ds reverse
 ```
 
 Adds keys found in `.env` but missing from `.env.example` as blank placeholders.
+Configured local keys remain blank in the schema and retain their host-specific
+value only in `.env`.
 
 ### `ds --version` and `ds version`
 

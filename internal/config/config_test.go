@@ -77,3 +77,46 @@ func TestLoadRejectsInvalidStorageMode(t *testing.T) {
 		t.Fatal("expected invalid storage mode error")
 	}
 }
+
+func TestLoadNormalizesLocalKeys(t *testing.T) {
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, ".envsync.yaml"), []byte("local_keys:\n  - ' FILE '\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(project, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if len(cfg.LocalKeys) != 1 || cfg.LocalKeys[0] != "FILE" {
+		t.Fatalf("expected normalized local keys, got %#v", cfg.LocalKeys)
+	}
+	if !cfg.IsLocalKey("FILE") || !cfg.IsLocalKey(" FILE ") {
+		t.Fatal("expected IsLocalKey to normalize lookups")
+	}
+	if cfg.IsLocalKey("OTHER") {
+		t.Fatal("unexpected local key match")
+	}
+}
+
+func TestLoadRejectsInvalidLocalKeys(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+	}{
+		{name: "blank", yaml: "local_keys:\n  - ' '\n"},
+		{name: "duplicate", yaml: "local_keys:\n  - FILE\n  - ' FILE '\n"},
+		{name: "provider mapping", yaml: "local_keys:\n  - FILE\nmapping:\n  FILE: file\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			project := t.TempDir()
+			if err := os.WriteFile(filepath.Join(project, ".envsync.yaml"), []byte(test.yaml), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(project, LoadOptions{}); err == nil {
+				t.Fatal("expected invalid local_keys error")
+			}
+		})
+	}
+}

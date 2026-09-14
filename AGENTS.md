@@ -59,9 +59,11 @@ contained in the appropriate adapter.
 ## Behavior that must be preserved
 
 - `.env.example` is the committed schema. Literal schema values are safe static
-  defaults; blank schema values are currently provider-managed. Source
-  classification is a user-facing contract, so centralize any new source type
-  instead of scattering special-case blank-value checks.
+  defaults; blank schema values are provider-managed unless their keys are
+  listed under `local_keys` in `.envsync.yaml`. Local values belong only in the
+  ignored `.env`, and missing local values are warning-only. Source
+  classification is a user-facing contract, so centralize source types instead
+  of scattering special-case blank-value checks.
 - Preserve schema ordering, comments, inline comments, line endings, and
   no-op file stability. Use the existing document and atomic-write helpers
   rather than reconstructing dotenv files ad hoc.
@@ -71,7 +73,8 @@ contained in the appropriate adapter.
 - Maintain the documented exit-code distinction: operational failures return
   `1`; malformed input, drift, duplicates, and unresolved values return `2`.
 - `ds push` is Bitwarden-only. KeePass `ds scaffold` creates only missing blank
-  entry structure and must never overwrite existing KeePass values.
+  entry structure, excludes `local_keys`, and must never overwrite existing
+  KeePass values. Provider write-back must never include local values.
 - Preserve Linux, macOS, and Windows behavior. Isolate genuinely
   platform-specific code and test it through the existing portable harnesses.
 

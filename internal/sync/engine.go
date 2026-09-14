@@ -37,6 +37,7 @@ type Plan struct {
 	Changes        []ChangeRecord
 	WriteRequired  bool
 	Issues         []ValidationIssue
+	Warnings       []ValidationIssue
 }
 
 func Summarize(changes []ChangeRecord) report.Summary {
@@ -57,6 +58,12 @@ func Summarize(changes []ChangeRecord) report.Summary {
 			summary.Error++
 		}
 	}
+	return summary
+}
+
+func SummarizePlan(plan Plan) report.Summary {
+	summary := Summarize(plan.Changes)
+	summary.Warnings = len(plan.Warnings)
 	return summary
 }
 

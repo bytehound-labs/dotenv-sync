@@ -22,6 +22,7 @@ type Summary struct {
 	Missing   int
 	Extra     int
 	Error     int
+	Warnings  int
 }
 
 func SummaryLine(status, target string, summary Summary, note string) string {
@@ -44,6 +45,9 @@ func SummaryLine(status, target string, summary Summary, note string) string {
 	if summary.Error > 0 {
 		parts = append(parts, fmt.Sprintf("error: %d", summary.Error))
 	}
+	if summary.Warnings > 0 {
+		parts = append(parts, fmt.Sprintf("warnings: %d", summary.Warnings))
+	}
 	if note != "" {
 		parts = append(parts, note)
 	}
@@ -55,6 +59,10 @@ func SummaryLine(status, target string, summary Summary, note string) string {
 
 func ChangeLine(action, key, marker string) string {
 	return strings.TrimSpace(fmt.Sprintf("%s %s %s", strings.ToUpper(action), key, marker))
+}
+
+func WarningLine(key, message string) string {
+	return strings.TrimSpace(fmt.Sprintf("WARNING %s %s", key, message))
 }
 
 func MissingLine(key string) string {

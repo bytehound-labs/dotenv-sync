@@ -25,8 +25,17 @@ func PlanReverse(_ context.Context, cfg config.Config) (Plan, envfile.Document, 
 		return plan, envfile.Document{}, report.SilentExit(report.ExitValidation)
 	}
 	target, added := envfile.ReverseMerge(schema, local)
+	_, schemaIssues := classifySchema(cfg, target)
+	plan.Issues = append(plan.Issues, schemaIssues...)
+	if len(schemaIssues) > 0 {
+		return plan, target, issueAsValidationError(schemaIssues[0], "reverse cannot produce a valid .env.example")
+	}
 	for _, key := range added {
-		plan.Changes = append(plan.Changes, ChangeRecord{Key: key, ChangeType: "add", File: "schema", After: report.MarkerForSource("missing"), Message: "blank placeholder will be added"})
+		marker := report.MarkerForSource("missing")
+		if cfg.IsLocalKey(key) {
+			marker = report.MarkerForSource(string(config.SourceLocal))
+		}
+		plan.Changes = append(plan.Changes, ChangeRecord{Key: key, ChangeType: "add", File: "schema", After: marker, Message: "blank placeholder will be added"})
 	}
 	plan.WriteRequired = len(added) > 0
 	if !plan.WriteRequired {
@@ -45,15 +54,22 @@ func PlanInit(cfg config.Config) (Plan, envfile.Document, error) {
 	if len(plan.Issues) > 0 {
 		return plan, envfile.Document{}, issueAsValidationError(plan.Issues[0], "init cannot generate .env.example from the current .env")
 	}
-	target := envfile.InitSchemaFromEnv(local)
+	target := envfile.InitSchemaFromEnvWithLocalKeys(local, cfg.IsLocalKey)
 	target.Path = cfg.SchemaFile
+	_, schemaIssues := classifySchema(cfg, target)
+	plan.Issues = append(plan.Issues, schemaIssues...)
+	if len(schemaIssues) > 0 {
+		return plan, target, issueAsValidationError(schemaIssues[0], "init cannot generate a valid .env.example")
+	}
 	for _, line := range target.Lines {
 		if line.LineType != envfile.LineAssignment {
 			continue
 		}
 		changeType := "add"
 		marker := report.MarkerForSource("static")
-		if line.ManagedByProvider {
+		if cfg.ClassifySource(line.Key, line.ManagedByProvider) == config.SourceLocal {
+			marker = report.MarkerForSource(string(config.SourceLocal))
+		} else if line.ManagedByProvider {
 			marker = report.MarkerForSource("missing")
 		}
 		plan.Changes = append(plan.Changes, ChangeRecord{Key: line.Key, ChangeType: changeType, File: "schema", After: marker, Message: "schema entry prepared"})

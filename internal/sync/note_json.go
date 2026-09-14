@@ -26,9 +26,16 @@ func CanonicalEnvMap(values map[string]string) map[string]string {
 }
 
 func CanonicalDocumentEnv(doc envfile.Document) map[string]string {
+	return CanonicalDocumentEnvExcept(doc, nil)
+}
+
+func CanonicalDocumentEnvExcept(doc envfile.Document, exclude func(string) bool) map[string]string {
 	values := make(map[string]string, len(doc.Lines))
 	for _, line := range doc.Lines {
 		if line.LineType != envfile.LineAssignment {
+			continue
+		}
+		if exclude != nil && exclude(line.Key) {
 			continue
 		}
 		values[line.Key] = line.Value

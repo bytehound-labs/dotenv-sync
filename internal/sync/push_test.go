@@ -104,3 +104,81 @@ func TestPlanPushDocsRejectsUnsupportedFieldsModeMapping(t *testing.T) {
 		t.Fatalf("expected unsupported fields-mode mapping error, got %v", err)
 	}
 }
+
+func TestPlanPushDocsExcludesLocalKeysAndRemovesStaleNoteJSONValues(t *testing.T) {
+	cfg := config.Config{
+		ItemName:    "my-repo",
+		StorageMode: config.StorageModeNoteJSON,
+		LocalKeys:   []string{"FILE"},
+	}
+	schema := envfile.ParseBytes(".env.example", envfile.KindSchema, []byte("FILE=\nJWT_SECRET=\nPORT=8080\n"))
+	local := envfile.ParseBytes(".env", envfile.KindLocal, []byte("FILE=1\nJWT_SECRET=new-secret\nPORT=8080\n"))
+	prov := &fakeProvider{
+		payload: provider.EnvPayload{
+			ItemName: "my-repo",
+			Exists:   true,
+			Env: map[string]string{
+				"FILE":       "old-host-value",
+				"JWT_SECRET": "old-secret",
+				"PORT":       "8080",
+			},
+		},
+	}
+
+	plan, target, err := PlanPushDocs(context.Background(), cfg, schema, local, prov)
+	if err != nil {
+		t.Fatalf("plan push docs: %v", err)
+	}
+	if _, ok := target.Env["FILE"]; ok {
+		t.Fatalf("local key leaked into target payload: %#v", target.Env)
+	}
+	if target.Env["JWT_SECRET"] != "new-secret" || target.Env["PORT"] != "8080" {
+		t.Fatalf("unexpected target payload: %#v", target.Env)
+	}
+	if !plan.WriteRequired {
+		t.Fatal("expected stale local provider value to require a write")
+	}
+	if summary := Summarize(plan.Changes); summary.Updated != 2 || summary.Unchanged != 1 {
+		t.Fatalf("unexpected push summary: %+v", summary)
+	}
+	for _, change := range plan.Changes {
+		if change.Key == "FILE" && strings.Contains(change.After, "1") {
+			t.Fatalf("local value leaked in change: %+v", change)
+		}
+	}
+}
+
+func TestPlanPushDocsExcludesLocalKeysFromFieldsMode(t *testing.T) {
+	cfg := config.Config{
+		ItemName:    "shared-dev",
+		StorageMode: config.StorageModeFields,
+		LocalKeys:   []string{"FILE"},
+		Mapping:     map[string]string{"JWT_SECRET": "password"},
+	}
+	schema := envfile.ParseBytes(".env.example", envfile.KindSchema, []byte("FILE=\nJWT_SECRET=\n"))
+	local := envfile.ParseBytes(".env", envfile.KindLocal, []byte("FILE=1\nJWT_SECRET=secret\n"))
+	prov := &fakeProvider{
+		payload: provider.EnvPayload{
+			ItemName: "shared-dev",
+			Exists:   true,
+			Password: "old-secret",
+		},
+		resolutions: map[string]provider.Resolution{
+			"JWT_SECRET": {Key: "JWT_SECRET", Ref: "password", Source: "provider", Value: "old-secret"},
+		},
+	}
+
+	plan, target, err := PlanPushDocs(context.Background(), cfg, schema, local, prov)
+	if err != nil {
+		t.Fatalf("plan push docs: %v", err)
+	}
+	if _, ok := target.Env["FILE"]; ok {
+		t.Fatalf("local key leaked into fields target: %#v", target.Env)
+	}
+	if target.Env["JWT_SECRET"] != "secret" {
+		t.Fatalf("unexpected fields target: %#v", target.Env)
+	}
+	if summary := Summarize(plan.Changes); summary.Updated != 1 {
+		t.Fatalf("unexpected fields summary: %+v", summary)
+	}
+}
