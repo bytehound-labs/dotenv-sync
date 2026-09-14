@@ -486,8 +486,18 @@ ds version
 
 ## CI and releases
 
-GitHub Actions runs `go test ./...` on every push, pull request, and manual
-dispatch via `.github/workflows/go-tests.yml`.
+GitHub Actions validates every push, pull request, and manual dispatch through
+`.github/workflows/go-tests.yml`. The workflow checks Go formatting and module
+tidiness, runs `go vet ./...`, executes the full test suite on Ubuntu, macOS,
+and Windows, runs race-enabled tests on Ubuntu, and builds the Linux, macOS,
+and Windows release targets. The `Required checks` job is the stable aggregate
+status for branch protection.
+
+`.github/workflows/go-coverage.yml` generates a native Go coverage profile,
+enforces the committed floor in `.github/coverage-floor.txt`, and uploads the
+profile as a short-lived Actions artifact. The coverage floor is intentionally
+kept in the repository so a coverage regression is visible in review without
+requiring a third-party coverage service.
 
 Every push to `main` now drives release automation automatically:
 
@@ -587,6 +597,8 @@ Repository-specific contributor and coding-agent guidance lives in
 ```bash
 gofmt -w ./path/to/changed.go
 go test ./...
+go test ./... -count=1 -covermode=atomic -coverprofile=coverage.out
+go tool cover -func=coverage.out
 go vet ./...
 go test ./... -run TestContract
 go test ./... -bench . -run '^$'

@@ -26,7 +26,7 @@ func repoRoot(t *testing.T) string {
 
 func buildCLI(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "ds")
+	bin := testBinaryPath(t, "ds")
 	cmd := exec.Command("go", "build", "-o", bin, "./cmd/ds")
 	cmd.Dir = repoRootFromTB(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -37,7 +37,7 @@ func buildCLI(t *testing.T) string {
 
 func buildCLIWithLdflags(t *testing.T, version, commit, buildTime string) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "ds")
+	bin := testBinaryPath(t, "ds")
 	ldflags := "-X dotenv-sync/pkg/dotenvsync.Version=" + version +
 		" -X dotenv-sync/pkg/dotenvsync.Commit=" + commit +
 		" -X dotenv-sync/pkg/dotenvsync.BuildTime=" + buildTime
@@ -56,7 +56,7 @@ func readRepoFile(t *testing.T, parts ...string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(data)
+	return strings.ReplaceAll(string(data), "\r\n", "\n")
 }
 
 func renderTemplate(input string, replacements map[string]string) string {
@@ -97,7 +97,7 @@ func runCLI(t *testing.T, bin, dir string, extraEnv []string, args ...string) (s
 
 func runGoMain(t *testing.T, dir, pkg string, args ...string) (string, string, int) {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "go-main")
+	bin := testBinaryPath(t, "go-main")
 	build := exec.Command("go", "build", "-o", bin, pkg)
 	build.Dir = dir
 	build.Env = append(os.Environ(), "GOFLAGS=")
@@ -200,6 +200,14 @@ func commitAll(t *testing.T, dir, message string) string {
 
 func currentPlatform() string {
 	return runtime.GOOS + "/" + runtime.GOARCH
+}
+
+func testBinaryPath(t *testing.T, name string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(t.TempDir(), name)
 }
 
 func writeFile(t *testing.T, path, content string) {

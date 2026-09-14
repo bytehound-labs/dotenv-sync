@@ -3,25 +3,13 @@ package keepass
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
+
+	"dotenv-sync/internal/testutil"
 )
 
-// stubBin writes a shell script to dir/<name> and returns its path.
-// The script is made executable so exec.LookPath and exec.Command can use it.
-func stubBin(t *testing.T, dir, name, script string) string {
-	t.Helper()
-	bin := filepath.Join(dir, name)
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"+script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return bin
-}
-
-// clientWithBin returns a KPXCClient wired to a stub binary with the given password.
-func clientWithBin(bin, password string) *KPXCClient {
-	return &KPXCClient{Bin: bin, Password: password}
+func clientWithStub(stub testutil.KeepassStub, password string) *KPXCClient {
+	return &KPXCClient{Bin: stub.Path(), Password: password}
 }
 
 // --- parsePasswordField ---
@@ -88,17 +76,11 @@ func TestIsNotFoundTextIgnoresUnrelatedErrors(t *testing.T) {
 // --- KPXCClient.Show ---
 
 func TestKPXCClientShowReturnsPasswordValue(t *testing.T) {
-	dir := t.TempDir()
-	bin := stubBin(t, dir, "keepassxc-cli", `
-if [ "$1" = "show" ] && [ "$2" = "-s" ]; then
-  printf "Title: DATABASE_URL\nUserName: \nPassword: postgres://vault/dev\nURL: \nNotes: \n"
-  exit 0
-fi
-echo "unexpected args" >&2
-exit 1
-`)
-	client := clientWithBin(bin, "masterpassword")
-	value, err := client.Show(context.Background(), "test.kdbx", "dotenv/DATABASE_URL")
+	stub := testutil.WriteKeepassStub(t, testutil.KeepassStubOptions{
+		Values: map[string]string{"dotenv/DATABASE_URL": "postgres://vault/dev"},
+	})
+	stub.SetEnv(t)
+	value, err := clientWithStub(stub, "masterpassword").Show(context.Background(), "test.kdbx", "dotenv/DATABASE_URL")
 	if err != nil {
 		t.Fatalf("Show: %v", err)
 	}
@@ -108,20 +90,18 @@ exit 1
 }
 
 func TestKPXCClientShowReturnsErrItemNotFound(t *testing.T) {
-	dir := t.TempDir()
-	bin := stubBin(t, dir, "keepassxc-cli", `
-echo "Entry not found." >&2
-exit 1
-`)
-	client := clientWithBin(bin, "masterpassword")
-	_, err := client.Show(context.Background(), "test.kdbx", "dotenv/MISSING")
+	stub := testutil.WriteKeepassStub(t, testutil.KeepassStubOptions{
+		Missing: []string{"dotenv/MISSING"},
+	})
+	stub.SetEnv(t)
+	_, err := clientWithStub(stub, "masterpassword").Show(context.Background(), "test.kdbx", "dotenv/MISSING")
 	if !errors.Is(err, ErrItemNotFound) {
 		t.Fatalf("expected ErrItemNotFound, got %v", err)
 	}
 }
 
 func TestKPXCClientShowReturnsErrBinaryMissing(t *testing.T) {
-	client := clientWithBin("/nonexistent/keepassxc-cli", "pw")
+	client := &KPXCClient{Bin: "/nonexistent/keepassxc-cli", Password: "pw"}
 	_, err := client.Show(context.Background(), "test.kdbx", "dotenv/KEY")
 	if !errors.Is(err, ErrBinaryMissing) {
 		t.Fatalf("expected ErrBinaryMissing, got %v", err)
@@ -131,20 +111,16 @@ func TestKPXCClientShowReturnsErrBinaryMissing(t *testing.T) {
 // --- KPXCClient.ListGroup ---
 
 func TestKPXCClientListGroupReturnsEntries(t *testing.T) {
-	dir := t.TempDir()
-	bin := stubBin(t, dir, "keepassxc-cli", `
-if [ "$1" = "ls" ]; then
-  printf "DATABASE_URL\nJWT_SECRET\nsubgroup/\n"
-  exit 0
-fi
-exit 1
-`)
-	client := clientWithBin(bin, "masterpassword")
-	entries, err := client.ListGroup(context.Background(), "test.kdbx", "dotenv")
+	stub := testutil.WriteKeepassStub(t, testutil.KeepassStubOptions{
+		Entries: map[string][]string{
+			"dotenv": {"DATABASE_URL", "JWT_SECRET", "subgroup/"},
+		},
+	})
+	stub.SetEnv(t)
+	entries, err := clientWithStub(stub, "masterpassword").ListGroup(context.Background(), "test.kdbx", "dotenv")
 	if err != nil {
 		t.Fatalf("ListGroup: %v", err)
 	}
-	// subgroup/ should be filtered out, leaving two entries
 	if len(entries) != 2 {
 		t.Fatalf("expected 2 entries, got %d: %v", len(entries), entries)
 	}
@@ -154,13 +130,11 @@ exit 1
 }
 
 func TestKPXCClientListGroupReturnsErrItemNotFound(t *testing.T) {
-	dir := t.TempDir()
-	bin := stubBin(t, dir, "keepassxc-cli", `
-echo "Could not find entry nosuchgroup." >&2
-exit 1
-`)
-	client := clientWithBin(bin, "masterpassword")
-	_, err := client.ListGroup(context.Background(), "test.kdbx", "nosuchgroup")
+	stub := testutil.WriteKeepassStub(t, testutil.KeepassStubOptions{
+		Missing: []string{"nosuchgroup"},
+	})
+	stub.SetEnv(t)
+	_, err := clientWithStub(stub, "masterpassword").ListGroup(context.Background(), "test.kdbx", "nosuchgroup")
 	if !errors.Is(err, ErrItemNotFound) {
 		t.Fatalf("expected ErrItemNotFound, got %v", err)
 	}

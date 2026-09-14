@@ -3,11 +3,15 @@ package integration_test
 import (
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestInstallLocalScript(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("install-local.sh is a POSIX shell integration test")
+	}
 	repo := repoRoot(t)
 	script := filepath.Join(repo, "scripts", "install-local.sh")
 	dest := filepath.Join(t.TempDir(), "ds")

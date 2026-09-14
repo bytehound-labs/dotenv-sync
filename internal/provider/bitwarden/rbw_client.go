@@ -1,6 +1,7 @@
 package bitwarden
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -41,15 +42,20 @@ func (c *RBWClient) run(ctx context.Context, extraEnv []string, args ...string) 
 	if len(extraEnv) > 0 {
 		cmd.Env = append(os.Environ(), extraEnv...)
 	}
-	out, err := cmd.CombinedOutput()
-	text := strings.TrimSpace(string(out))
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	stdoutText := strings.TrimSpace(stdout.String())
+	stderrText := strings.TrimSpace(stderr.String())
+	text := strings.TrimSpace(strings.Join([]string{stdoutText, stderrText}, "\n"))
 	if err != nil {
 		if text == "" {
 			return text, fmt.Errorf("rbw %s failed: %w", strings.Join(args, " "), err)
 		}
 		return text, fmt.Errorf("%s", text)
 	}
-	return text, nil
+	return stdoutText, nil
 }
 
 func (c *RBWClient) GetRawItem(ctx context.Context, itemName string) (RawItem, error) {
@@ -122,11 +128,7 @@ func (c *RBWClient) runInteractive(ctx context.Context, extraEnv []string, args 
 	if err != nil {
 		return c.run(ctx, extraEnv, args...)
 	}
-	commandLine := shellQuote(c.Bin)
-	for _, arg := range args {
-		commandLine += " " + shellQuote(arg)
-	}
-	cmd := exec.CommandContext(ctx, scriptBin, "-q", "-c", commandLine, "/dev/null")
+	cmd := exec.CommandContext(ctx, scriptBin, interactiveScriptArgs(runtime.GOOS, c.Bin, args...)...)
 	if len(extraEnv) > 0 {
 		cmd.Env = append(os.Environ(), extraEnv...)
 	}
@@ -139,6 +141,17 @@ func (c *RBWClient) runInteractive(ctx context.Context, extraEnv []string, args 
 		return text, fmt.Errorf("%s", text)
 	}
 	return text, nil
+}
+
+func interactiveScriptArgs(goos, bin string, args ...string) []string {
+	if goos == "darwin" {
+		return append([]string{"-q", "/dev/null", bin}, args...)
+	}
+	commandLine := shellQuote(bin)
+	for _, arg := range args {
+		commandLine += " " + shellQuote(arg)
+	}
+	return []string{"-q", "-c", commandLine, "/dev/null"}
 }
 
 func renderEditorContent(password, notes string) string {
