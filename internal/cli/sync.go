@@ -36,10 +36,11 @@ func newSyncCommand(s streams, opts *rootOptions) *cobra.Command {
 					}
 				}
 			}
+			printWarnings(s.stdout, plan.Warnings)
 			if err != nil {
 				return err
 			}
-			summary := syncpkg.Summarize(plan.Changes)
+			summary := syncpkg.SummarizePlan(plan)
 			if dryRun {
 				if plan.WriteRequired {
 					fmt.Fprintln(s.stdout, report.SummaryLine(report.StatusChecked, cfg.EnvFile, summary, "dry-run"))

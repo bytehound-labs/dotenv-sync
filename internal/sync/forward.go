@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"dotenv-sync/internal/config"
 	"dotenv-sync/internal/envfile"
@@ -32,16 +33,10 @@ func PlanForwardDocs(ctx context.Context, cfg config.Config, schema, local envfi
 	plan := Plan{Mode: "sync", Schema: schema, LocalEnv: local, Config: cfg}
 	plan.Issues = append(plan.Issues, collectDocumentIssues(schema)...)
 	plan.Issues = append(plan.Issues, collectDocumentIssues(local)...)
+	sources, schemaIssues := classifySchema(cfg, schema)
+	plan.Issues = append(plan.Issues, schemaIssues...)
 	if len(plan.Issues) > 0 {
 		return plan, envfile.Document{}, report.SilentExit(report.ExitValidation)
-	}
-	status, err := prov.CheckReadiness(ctx)
-	if err != nil {
-		return plan, envfile.Document{}, err
-	}
-	plan.ProviderStatus = status
-	if status.Code != "" {
-		return plan, envfile.Document{}, report.NewAppError(status.Code, report.ExitOperational, status.Problem, status.Impact, status.Action, nil)
 	}
 	refs := map[string]string{}
 	resolutions := map[string]provider.Resolution{}
@@ -49,23 +44,34 @@ func PlanForwardDocs(ctx context.Context, cfg config.Config, schema, local envfi
 		if line.LineType != envfile.LineAssignment {
 			continue
 		}
-		if !line.ManagedByProvider {
-			resolutions[line.Key] = provider.Resolution{Key: line.Key, Ref: line.Key, Value: line.Value, Source: "static"}
-			continue
+		switch sources[line.Key] {
+		case config.SourceStatic:
+			resolutions[line.Key] = provider.Resolution{Key: line.Key, Ref: line.Key, Value: line.Value, Source: string(config.SourceStatic)}
+		case config.SourceProvider:
+			refs[line.Key] = cfg.ProviderRef(line.Key)
 		}
-		refs[line.Key] = cfg.ProviderRef(line.Key)
 	}
-	providerResults, err := prov.ResolveMany(ctx, refs)
-	if err != nil {
-		var appErr *report.AppError
-		if errors.As(err, &appErr) {
+	if len(refs) > 0 {
+		status, err := prov.CheckReadiness(ctx)
+		if err != nil {
 			return plan, envfile.Document{}, err
 		}
-		return plan, envfile.Document{}, report.NewAppError("E003", report.ExitOperational, "provider resolution failed", "sync cannot resolve provider-managed schema keys", "check the configured provider and retry", err)
-	}
-	for key, res := range providerResults {
-		resolutions[key] = res
-		plan.Resolutions = append(plan.Resolutions, res)
+		plan.ProviderStatus = status
+		if status.Code != "" {
+			return plan, envfile.Document{}, report.NewAppError(status.Code, report.ExitOperational, status.Problem, status.Impact, status.Action, nil)
+		}
+		providerResults, err := prov.ResolveMany(ctx, refs)
+		if err != nil {
+			var appErr *report.AppError
+			if errors.As(err, &appErr) {
+				return plan, envfile.Document{}, err
+			}
+			return plan, envfile.Document{}, report.NewAppError("E003", report.ExitOperational, "provider resolution failed", "sync cannot resolve provider-managed schema keys", "check the configured provider and retry", err)
+		}
+		for key, res := range providerResults {
+			resolutions[key] = res
+			plan.Resolutions = append(plan.Resolutions, res)
+		}
 	}
 	target := schema.Clone()
 	target.Kind = envfile.KindLocal
@@ -79,17 +85,42 @@ func PlanForwardDocs(ctx context.Context, cfg config.Config, schema, local envfi
 		if line.LineType != envfile.LineAssignment {
 			continue
 		}
-		res := resolutions[line.Key]
-		marker := report.MarkerForSource(res.Source)
-		if res.Source == "static" {
-			marker = report.MarkerForSource("static")
+		source := sources[line.Key]
+		before, ok := localAssignments[line.Key]
+		localMissing := false
+		if source == config.SourceLocal {
+			localMissing = !ok || strings.TrimSpace(before.Value) == ""
+			if localMissing {
+				line.Value = ""
+				plan.Warnings = append(plan.Warnings, localValueWarning(cfg, line.Key))
+			} else {
+				line.Value = before.Value
+			}
+			target.Lines[i] = line
+			if localMissing {
+				if !ok || (strings.TrimSpace(before.Value) == "" && before.Prefix == line.Prefix && before.Suffix == line.Suffix) {
+					continue
+				}
+			}
 		}
-		if res.Source == "provider" || res.Source == "static" {
+		res := resolutions[line.Key]
+		marker := report.MarkerForSource(string(source))
+		if source == config.SourceProvider {
+			marker = report.MarkerForSource(res.Source)
+		}
+		if source != config.SourceLocal && (res.Source == "provider" || res.Source == "static") {
 			line.Value = res.Value
 			target.Lines[i] = line
 		}
-		before, ok := localAssignments[line.Key]
 		switch {
+		case source == config.SourceLocal:
+			if localMissing {
+				plan.Changes = append(plan.Changes, ChangeRecord{Key: line.Key, ChangeType: "update", File: "local", Before: report.RedactValue(before.Value), After: marker, Message: "blank local assignment will be normalized"})
+			} else if before.Value != line.Value || before.Prefix != line.Prefix || before.Suffix != line.Suffix {
+				plan.Changes = append(plan.Changes, ChangeRecord{Key: line.Key, ChangeType: "update", File: "local", Before: report.RedactValue(before.Value), After: marker, Message: "local value is preserved"})
+			} else {
+				plan.Changes = append(plan.Changes, ChangeRecord{Key: line.Key, ChangeType: "unchanged", File: "local", Before: report.RedactValue(before.Value), After: marker, Message: "local value is preserved"})
+			}
 		case res.Source == "missing" || res.Source == "error":
 			plan.Changes = append(plan.Changes, ChangeRecord{Key: line.Key, ChangeType: "missing", File: "local", After: report.MarkerForSource("missing"), Message: "provider value unavailable"})
 			plan.Issues = append(plan.Issues, ValidationIssue{Code: "E005", Severity: "error", File: cfg.EnvFile, Key: line.Key, Message: "secret not found for schema key", Action: "add the secret or mapping, then rerun"})

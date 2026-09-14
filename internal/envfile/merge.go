@@ -3,13 +3,17 @@ package envfile
 import "strings"
 
 func InitSchemaFromEnv(local Document) Document {
+	return InitSchemaFromEnvWithLocalKeys(local, nil)
+}
+
+func InitSchemaFromEnvWithLocalKeys(local Document, isLocalKey func(string) bool) Document {
 	schema := local.Clone()
 	schema.Kind = KindSchema
 	for i, line := range schema.Lines {
 		if line.LineType != LineAssignment {
 			continue
 		}
-		if IsSecretLike(line.Key, line.Value) {
+		if (isLocalKey != nil && isLocalKey(line.Key)) || IsSecretLike(line.Key, line.Value) {
 			line.Value = ""
 			line.ManagedByProvider = true
 		}

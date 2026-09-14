@@ -21,8 +21,9 @@ func newDiffCommand(s streams, opts *rootOptions) *cobra.Command {
 			for _, change := range plan.Changes {
 				fmt.Fprintln(s.stdout, report.ChangeLine(change.ChangeType, change.Key, change.After))
 			}
+			printWarnings(s.stdout, plan.Warnings)
 			if err == nil {
-				fmt.Fprintln(s.stdout, report.SummaryLine(report.StatusUnchanged, cfg.EnvFile, syncpkg.Summarize(plan.Changes), "already up to date"))
+				fmt.Fprintln(s.stdout, report.SummaryLine(report.StatusUnchanged, cfg.EnvFile, syncpkg.SummarizePlan(plan), "already up to date"))
 			}
 			return err
 		},

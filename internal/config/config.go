@@ -22,12 +22,15 @@ type Config struct {
 	StorageMode string            `yaml:"storage_mode"`
 	Vault       string            `yaml:"vault"`
 	Mapping     map[string]string `yaml:"mapping"`
+	LocalKeys   []string          `yaml:"local_keys"`
 	ConfigFile  string            `yaml:"-"`
 	BaseDir     string            `yaml:"-"`
 
 	// KeePass-specific fields. Ignored when provider is "bitwarden".
 	KeePassDatabase string `yaml:"keepass_database"` // path to the .kdbx file
 	KeePassGroup    string `yaml:"keepass_group"`    // group inside the vault that holds env vars
+
+	localKeySet map[string]struct{}
 }
 
 type LoadOptions struct {
@@ -45,6 +48,7 @@ func Default(baseDir string) Config {
 		StorageMode: StorageModeFields,
 		ConfigFile:  filepath.Join(baseDir, ".envsync.yaml"),
 		Mapping:     map[string]string{},
+		LocalKeys:   []string{},
 		BaseDir:     baseDir,
 	}
 }
@@ -89,6 +93,17 @@ func Load(baseDir string, opts LoadOptions) (Config, error) {
 	if cfg.Mapping == nil {
 		cfg.Mapping = map[string]string{}
 	}
+	localKeys, localKeySet, err := normalizeLocalKeys(cfg.LocalKeys)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.LocalKeys = localKeys
+	cfg.localKeySet = localKeySet
+	for key := range localKeySet {
+		if _, ok := cfg.Mapping[key]; ok {
+			return Config{}, fmt.Errorf("local key %q must not also appear in mapping", key)
+		}
+	}
 	// Resolve the KeePass database path relative to the base directory,
 	// the same way schema_file and env_file are resolved.
 	if cfg.KeePassDatabase != "" {
@@ -123,6 +138,37 @@ func (c Config) ProviderRef(key string) string {
 		return ref
 	}
 	return key
+}
+
+func (c Config) IsLocalKey(key string) bool {
+	key = strings.TrimSpace(key)
+	if c.localKeySet != nil {
+		_, ok := c.localKeySet[key]
+		return ok
+	}
+	for _, localKey := range c.LocalKeys {
+		if strings.TrimSpace(localKey) == key {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeLocalKeys(values []string) ([]string, map[string]struct{}, error) {
+	normalized := make([]string, 0, len(values))
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		key := strings.TrimSpace(value)
+		if key == "" {
+			return nil, nil, fmt.Errorf("local_keys entries must not be blank")
+		}
+		if _, exists := set[key]; exists {
+			return nil, nil, fmt.Errorf("local_keys contains duplicate key %q", key)
+		}
+		normalized = append(normalized, key)
+		set[key] = struct{}{}
+	}
+	return normalized, set, nil
 }
 
 func resolvePath(baseDir, value string) string {

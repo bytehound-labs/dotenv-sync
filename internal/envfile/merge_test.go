@@ -14,6 +14,15 @@ func TestInitSchemaFromEnvBlanksSecretLikeValues(t *testing.T) {
 	}
 }
 
+func TestInitSchemaFromEnvBlanksConfiguredLocalValues(t *testing.T) {
+	local := ParseBytes(".env", KindLocal, []byte("FILE=1\nPORT=8080\n"))
+	schema := InitSchemaFromEnvWithLocalKeys(local, func(key string) bool { return key == "FILE" })
+	got := string(Render(schema))
+	if got != "FILE=\nPORT=8080\n" {
+		t.Fatalf("unexpected schema output: %s", got)
+	}
+}
+
 func TestReverseMergeAddsBlankPlaceholders(t *testing.T) {
 	schema := ParseBytes(".env.example", KindSchema, []byte("PORT=8080\n"))
 	local := ParseBytes(".env", KindLocal, []byte("PORT=8080\nAPI_KEY=value\n"))
