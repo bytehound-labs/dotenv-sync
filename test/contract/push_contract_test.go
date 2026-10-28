@@ -35,6 +35,45 @@ func TestContractPush(t *testing.T) {
 		}
 	})
 
+	t.Run("dry run distinguishes retained keys from stale local keys", func(t *testing.T) {
+		project := setupProject(t,
+			"DATABASE_URL=\nFILE=\n",
+			"DATABASE_URL=synthetic-db\nFILE=host-local\n",
+			"storage_mode: note_json\nitem_name: Jesse\nlocal_keys:\n  - FILE\n",
+		)
+		stub := writeRBWStubWithOptions(t, rbwStubOptions{
+			Status: "unlocked",
+			Items: map[string]rbwStubItem{
+				itemName: {
+					Notes: `{"format":"dotenv-sync/note-json@v1","env":{"DATABASE_URL":"synthetic-db","FILE":"stale-local-copy","OTHER_BRANCH_KEY":"branch-value"}}`,
+				},
+			},
+		})
+
+		stdout, stderr, code := runCLI(t, bin, project, stub.Env(), "push", "--dry-run")
+		if code != 0 || stderr != "" {
+			t.Fatalf("push dry-run failed: code=%d stderr=%q", code, stderr)
+		}
+		for _, want := range []string{
+			"UNCHANGED DATABASE_URL [REDACTED]",
+			"UPDATE FILE [EMPTY]",
+			"UNCHANGED OTHER_BRANCH_KEY [REDACTED]",
+			"CHECKED bitwarden:Jesse (updated: 1, unchanged: 2, dry-run)",
+		} {
+			if !strings.Contains(stdout, want) {
+				t.Fatalf("push dry-run missing %q", want)
+			}
+		}
+		for _, secret := range []string{"synthetic-db", "stale-local-copy", "branch-value"} {
+			if strings.Contains(stdout, secret) {
+				t.Fatal("push dry-run exposed a provider or local value")
+			}
+		}
+		if log := stub.Log(t); strings.Contains(log, "add ") || strings.Contains(log, "edit ") || strings.Contains(log, "sync") {
+			t.Fatalf("dry-run should not mutate provider, log=%q", log)
+		}
+	})
+
 	t.Run("create writes repo-scoped note_json payload", func(t *testing.T) {
 		project := setupProject(t,
 			"DATABASE_URL=\nJWT_SECRET=\nPORT=8080\n",

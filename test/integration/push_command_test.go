@@ -12,6 +12,75 @@ func TestPushCommandIntegration(t *testing.T) {
 	itemName := "Jesse"
 	configYAML := "storage_mode: note_json\nitem_name: Jesse\n"
 
+	t.Run("note_json pushes retain keys across branch schemas", func(t *testing.T) {
+		branchA := setupProject(t,
+			"COMMON=\nBRANCH_A_ONLY=\n",
+			"COMMON=shared-local\nBRANCH_A_ONLY=branch-a-local\n",
+			configYAML,
+		)
+		branchB := setupProject(t,
+			"COMMON=\nBRANCH_B_ONLY=\n",
+			"COMMON=shared-local\nBRANCH_B_ONLY=branch-b-local\n",
+			configYAML,
+		)
+		stub := writeRBWStubWithOptions(t, rbwStubOptions{Status: "unlocked"})
+
+		stdout, stderr, code := runCLI(t, bin, branchA, stub.Env(), "push")
+		if code != 0 || stderr != "" || !strings.Contains(stdout, "WRITTEN bitwarden:Jesse") {
+			t.Fatalf("branch A push failed: code=%d stderr=%q", code, stderr)
+		}
+
+		logBeforeDryRun := stub.Log(t)
+		stdout, stderr, code = runCLI(t, bin, branchB, stub.Env(), "push", "--dry-run")
+		if code != 0 || stderr != "" {
+			t.Fatalf("branch B dry-run failed: code=%d stderr=%q", code, stderr)
+		}
+		for _, want := range []string{
+			"ADD BRANCH_B_ONLY [REDACTED]",
+			"UNCHANGED BRANCH_A_ONLY [REDACTED]",
+			"CHECKED bitwarden:Jesse (added: 1, unchanged: 2, dry-run)",
+		} {
+			if !strings.Contains(stdout, want) {
+				t.Fatalf("branch B dry-run missing %q", want)
+			}
+		}
+		if strings.Count(stub.Log(t), "add Jesse")+strings.Count(stub.Log(t), "edit Jesse") !=
+			strings.Count(logBeforeDryRun, "add Jesse")+strings.Count(logBeforeDryRun, "edit Jesse") {
+			t.Fatal("branch B dry-run mutated the provider")
+		}
+
+		stdout, stderr, code = runCLI(t, bin, branchB, stub.Env(), "push")
+		if code != 0 || stderr != "" {
+			t.Fatalf("branch B push failed: code=%d stderr=%q", code, stderr)
+		}
+		wantNotes := `{"format":"dotenv-sync/note-json@v1","env":{"BRANCH_A_ONLY":"branch-a-local","BRANCH_B_ONLY":"branch-b-local","COMMON":"shared-local"}}`
+		if notes := compactJSON(t, strings.TrimSpace(stub.Note(t, itemName))); notes != wantNotes {
+			t.Fatal("branch B push did not preserve the union of branch keys")
+		}
+
+		for _, branch := range []struct {
+			name       string
+			dir        string
+			ownKey     string
+			foreignKey string
+		}{
+			{name: "A", dir: branchA, ownKey: "BRANCH_A_ONLY", foreignKey: "BRANCH_B_ONLY"},
+			{name: "B", dir: branchB, ownKey: "BRANCH_B_ONLY", foreignKey: "BRANCH_A_ONLY"},
+		} {
+			stdout, stderr, code = runCLI(t, bin, branch.dir, stub.Env(), "sync")
+			if code != 0 || stderr != "" {
+				t.Fatalf("branch %s sync failed: code=%d stderr=%q", branch.name, code, stderr)
+			}
+			data, err := os.ReadFile(filepath.Join(branch.dir, ".env"))
+			if err != nil {
+				t.Fatalf("could not read branch %s env file", branch.name)
+			}
+			if !strings.Contains(string(data), branch.ownKey+"=") || strings.Contains(string(data), branch.foreignKey+"=") {
+				t.Fatalf("branch %s sync did not keep only its schema keys", branch.name)
+			}
+		}
+	})
+
 	t.Run("dry run create unchanged and update flows", func(t *testing.T) {
 		project := setupProject(t,
 			"DATABASE_URL=\nJWT_SECRET=\nPORT=8080\n",
