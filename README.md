@@ -196,10 +196,22 @@ bypass provider resolution.
 Bitwarden `storage_mode` defaults to `fields` for backward-compatible reads
 from the repo-scoped item fields. In `fields` mode, `ds push` can update
 provider-managed keys that map to Bitwarden's built-in `password` field. Set
-`storage_mode: note_json` to store the full repo env map in the item notes for
-round-trip `push`/`sync` workflows. Local keys are omitted from the payload; if
-an older payload contains one, the next `ds push` removes that stale provider
-copy.
+`storage_mode: note_json` to store an environment map in the item notes for
+round-trip `push`/`sync` workflows. In `note_json` mode, `ds push` merges
+assignments from `.env` into the existing note: local values add or update
+their keys, and provider keys absent from `.env` are retained, even when they
+are absent from the active `.env.example`. The shared note can therefore hold
+the union of keys used by multiple branches or worktrees. `ds sync` still
+resolves only the keys in the active `.env.example`; it does not add other
+branches' keys to the local file. An explicit blank assignment in `.env`
+overwrites a provider value with blank.
+
+Keys listed in `local_keys` are omitted from the payload. If an older payload
+contains one, the next `ds push` removes that stale provider copy. Key absence
+does not prune other provider values; remove obsolete values from the note
+deliberately after confirming no branch or environment still needs them.
+Assignments present in `.env` win for matching keys, so a stale local value
+can still overwrite a newer value for that same key.
 
 That makes shared aliases across repos possible with the default field-based
 layout. For example, both repos below read and write the same Bitwarden value:
@@ -250,6 +262,14 @@ If you use KeePass or another read-only flow, drop the `ds push` line and keep
 just `ds reverse` plus `git add .env.example`.
 
 For the smoothest Bitwarden write-back flow, use `storage_mode: note_json`.
+With that storage mode, the pre-commit `ds push` merges local assignments into
+the shared note instead of deleting keys absent from the current branch's
+`.env`. If the branches share an ignored `.env` in one checkout, `ds reverse`
+can still copy keys left over from another branch into the active schema.
+Separate worktrees keep local env files isolated; otherwise review the schema
+after `ds reverse`. Keys that need different values on different branches
+should use distinct names or separate Bitwarden items because the latest local
+value wins for a shared key.
 
 ## Refresh `.env` after pulling with Lefthook
 
@@ -356,14 +376,26 @@ ds push
 - Requires a Bitwarden write-capable setup; `note_json` is the simplest full
   round-trip mode
 - Reads `.env` as the upload source and `.env.example` as schema context
-- In `note_json`, writes a deterministic JSON payload into the repo-scoped
-  Bitwarden item notes
+- In `note_json`, merges `.env` assignments into the deterministic JSON payload
+  in the repo-scoped Bitwarden item notes; values present in `.env` add or
+  update keys, while existing provider keys absent from `.env` are retained
+- An explicit blank assignment in `.env` overwrites that provider value with
+  blank; absence from `.env` does not delete a provider key
+- The shared note may contain keys from multiple branches or worktrees, but
+  `ds sync` still writes only keys in the active `.env.example`
 - Excludes `local_keys` from both storage modes and removes stale local entries
   from an existing `note_json` payload
 - In `fields`, updates provider-managed keys present in `.env` when they map to
   Bitwarden's built-in `password` field
 - Never prints raw values; previews use redacted markers such as `[REDACTED]`
 - Leaves `.env` and `.env.example` untouched
+- Matching keys use the local `.env` value, so a stale local value can
+  overwrite a newer provider value; use separate keys or notes for
+  branch-specific values
+
+Provider keys absent from `.env` are retained by default. Review before
+deliberately removing an obsolete key from the Bitwarden note; absence from one
+branch's schema is not sufficient evidence that the key is unused elsewhere.
 
 Field mode is useful for shared aliases across repos, but `rbw` cannot script
 writes to arbitrary custom Bitwarden fields. If a repo maps pushed keys to

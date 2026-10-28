@@ -21,6 +21,28 @@ type fakePushProvider struct {
 	readinessOK bool
 }
 
+func TestPushHelpDocumentsNoteJSONMerge(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	cmd := newPushCommand(streams{stdout: &stdout, stderr: &stderr}, &rootOptions{})
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute push help: %v", err)
+	}
+	for _, want := range []string{
+		"assignments in .env add or update values",
+		"Keys absent from .env are retained",
+		"An explicit blank assignment writes an empty value",
+		"Configured local_keys are excluded",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("push help missing %q", want)
+		}
+	}
+}
+
 func (f *fakePushProvider) Name() string { return "fake" }
 
 func (f *fakePushProvider) CheckReadiness(_ context.Context) (provider.Status, error) {

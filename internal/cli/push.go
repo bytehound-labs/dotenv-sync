@@ -13,8 +13,17 @@ func newPushCommand(s streams, opts *rootOptions) *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "push",
-		Short: "Upload the current .env into the provider payload (Bitwarden-only)",
-		Args:  cobra.NoArgs,
+		Short: "Push local environment values to Bitwarden",
+		Long: `Push .env values to Bitwarden (Bitwarden-only).
+
+In note_json mode, assignments in .env add or update values in the existing
+note. Keys absent from .env are retained, even when they are absent from the
+active .env.example. An explicit blank assignment writes an empty value.
+Configured local_keys are excluded, and stale copies of those keys are removed.
+
+In fields mode, ds push updates provider-managed keys that map to the Bitwarden
+password field.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(opts)
 			if err != nil {

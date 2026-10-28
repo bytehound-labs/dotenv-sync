@@ -90,7 +90,17 @@ func PlanPushDocs(ctx context.Context, cfg config.Config, schema, local envfile.
 		Exists:      current.Exists,
 		Format:      NoteJSONFormat,
 		Password:    current.Password,
-		Env:         CanonicalDocumentEnvExcept(local, cfg.IsLocalKey),
+	}
+	target.Env = CanonicalEnvMap(current.Env)
+	for key := range target.Env {
+		if cfg.IsLocalKey(key) {
+			delete(target.Env, key)
+		}
+	}
+	for key, value := range localEnv {
+		if !cfg.IsLocalKey(key) {
+			target.Env[key] = value
+		}
 	}
 	plan.Changes = buildPushChanges(schema.AssignmentMap(), localEnv, target.Env, current.Env)
 	plan.WriteRequired = !NoteJSONEqual(target.Env, current.Env) || !current.Exists
@@ -106,7 +116,7 @@ func buildPushChanges(schemaKeys map[string]envfile.EnvironmentLine, localEnv, t
 	seen := make(map[string]struct{}, len(keys))
 	for _, key := range keys {
 		seen[key] = struct{}{}
-		localValue, hasLocal := targetEnv[key]
+		targetValue, hasTarget := targetEnv[key]
 		providerValue, hasProvider := providerEnv[key]
 		if _, inSchema := schemaKeys[key]; !inSchema {
 			localValue, hasLocal := localEnv[key]
@@ -120,20 +130,26 @@ func buildPushChanges(schemaKeys map[string]envfile.EnvironmentLine, localEnv, t
 					File:       "provider",
 					Message:    "present in .env but not in .env.example",
 				})
+			case hasTarget && !hasProvider:
+				changes = append(changes, ChangeRecord{Key: key, ChangeType: "add", File: "provider", After: report.RedactValue(targetValue), Message: "will be added to Bitwarden"})
+			case hasTarget && hasProvider && targetValue != providerValue:
+				changes = append(changes, ChangeRecord{Key: key, ChangeType: "update", File: "provider", Before: report.RedactValue(providerValue), After: report.RedactValue(targetValue), Message: "will be updated in Bitwarden"})
+			case hasTarget && hasProvider:
+				changes = append(changes, ChangeRecord{Key: key, ChangeType: "unchanged", File: "provider", After: report.RedactValue(targetValue), Message: "provider key is retained"})
 			case hasProvider:
 				changes = append(changes, ChangeRecord{Key: key, ChangeType: "update", File: "provider", Before: report.RedactValue(providerValue), After: report.RedactValue(""), Message: "will be removed from Bitwarden"})
 			}
 			continue
 		}
 		switch {
-		case hasLocal && !hasProvider:
-			changes = append(changes, ChangeRecord{Key: key, ChangeType: "add", File: "provider", After: report.RedactValue(localValue), Message: "will be added to Bitwarden"})
-		case !hasLocal && hasProvider:
+		case hasTarget && !hasProvider:
+			changes = append(changes, ChangeRecord{Key: key, ChangeType: "add", File: "provider", After: report.RedactValue(targetValue), Message: "will be added to Bitwarden"})
+		case !hasTarget && hasProvider:
 			changes = append(changes, ChangeRecord{Key: key, ChangeType: "update", File: "provider", Before: report.RedactValue(providerValue), After: report.RedactValue(""), Message: "will be removed from Bitwarden"})
-		case localValue != providerValue:
-			changes = append(changes, ChangeRecord{Key: key, ChangeType: "update", File: "provider", Before: report.RedactValue(providerValue), After: report.RedactValue(localValue), Message: "will be updated in Bitwarden"})
+		case targetValue != providerValue:
+			changes = append(changes, ChangeRecord{Key: key, ChangeType: "update", File: "provider", Before: report.RedactValue(providerValue), After: report.RedactValue(targetValue), Message: "will be updated in Bitwarden"})
 		default:
-			changes = append(changes, ChangeRecord{Key: key, ChangeType: "unchanged", File: "provider", After: report.RedactValue(localValue), Message: "already current"})
+			changes = append(changes, ChangeRecord{Key: key, ChangeType: "unchanged", File: "provider", After: report.RedactValue(targetValue), Message: "already current"})
 		}
 	}
 	for _, key := range report.SortedKeys(localEnv) {
